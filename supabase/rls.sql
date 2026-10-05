@@ -45,6 +45,50 @@ AND om.status = 'active'
 );
 $$;
 
+-- Check conversation membership without recursively evaluating the
+-- conversation_members RLS policy.
+CREATE OR REPLACE FUNCTION public.is_conversation_member(
+  p_conversation_id uuid,
+  p_user_id uuid
+)
+RETURNS boolean
+LANGUAGE sql
+STABLE
+SECURITY DEFINER
+SET search_path = public
+AS $$
+  SELECT EXISTS (
+    SELECT 1
+    FROM public.conversation_members cm
+    WHERE cm.conversation_id = p_conversation_id
+      AND cm.user_id = p_user_id
+      AND p_user_id = auth.uid()
+  );
+$$;
+
+REVOKE ALL
+ON FUNCTION public.is_conversation_member(uuid, uuid)
+FROM PUBLIC, anon;
+
+GRANT EXECUTE
+ON FUNCTION public.is_conversation_member(uuid, uuid)
+TO authenticated;
+
+-- Define this helper before any policy references it so this script also works
+-- on a fresh database without relying on a later feature migration.
+CREATE OR REPLACE FUNCTION public.is_platform_admin()
+RETURNS boolean
+LANGUAGE sql
+STABLE
+SECURITY DEFINER
+SET search_path = public
+AS $$
+  SELECT EXISTS (SELECT 1 FROM public.platform_admins WHERE id = auth.uid());
+$$;
+
+REVOKE ALL ON FUNCTION public.is_platform_admin() FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.is_platform_admin() TO authenticated;
+
 -- ============================================================
 -- REMOVE EXISTING POLICIES
 -- This makes the script safe to re-run.
@@ -107,14 +151,23 @@ ON public.welfare_checks;
 DROP POLICY IF EXISTS "conversation members read"
 ON public.conversations;
 
+DROP POLICY IF EXISTS "conversation participants or admins read conversations"
+ON public.conversations;
+
 -- CONVERSATION MEMBERS
 
 DROP POLICY IF EXISTS "conversation members read membership"
 ON public.conversation_members;
 
+DROP POLICY IF EXISTS "conversation participants read membership"
+ON public.conversation_members;
+
 -- MESSAGES
 
 DROP POLICY IF EXISTS "conversation participants read messages"
+ON public.messages;
+
+DROP POLICY IF EXISTS "conversation participants or admins read messages"
 ON public.messages;
 
 DROP POLICY IF EXISTS "conversation participants send messages"
@@ -159,6 +212,25 @@ auth.uid() = id
 )
 WITH CHECK (
 auth.uid() = id
+);
+
+DROP POLICY IF EXISTS "org members read profiles" ON public.profiles;
+CREATE POLICY "org members read profiles"
+ON public.profiles
+FOR SELECT
+USING (
+  id = auth.uid()
+  OR EXISTS (
+    SELECT 1
+    FROM public.organization_members viewer
+    JOIN public.organization_members target
+      ON target.organization_id = viewer.organization_id
+    WHERE viewer.user_id = auth.uid()
+      AND viewer.status = 'active'
+      AND target.user_id = public.profiles.id
+      AND target.status = 'active'
+  )
+  OR public.is_platform_admin()
 );
 
 -- ORGANIZATION MEMBERS
@@ -300,43 +372,32 @@ CREATE POLICY "conversation members read"
 ON public.conversations
 FOR SELECT
 USING (
-public.is_org_member(organization_id)
-AND EXISTS (
-SELECT 1
-FROM public.conversation_members cm
-WHERE cm.conversation_id = conversations.id
-AND cm.user_id = auth.uid()
-)
+ public.is_platform_admin()
+ OR (
+   public.is_org_member(organization_id)
+   AND public.is_conversation_member(conversations.id, auth.uid())
+ )
 );
 
 -- CONVERSATION MEMBERS
 
-CREATE POLICY "conversation members read membership"
+CREATE POLICY "conversation participants read membership"
 ON public.conversation_members
 FOR SELECT
 USING (
 user_id = auth.uid()
-OR EXISTS (
-SELECT 1
-FROM public.conversation_members cm
-WHERE cm.conversation_id =
-conversation_members.conversation_id
-AND cm.user_id = auth.uid()
-)
+OR public.is_conversation_member(conversation_members.conversation_id, auth.uid())
+OR public.is_platform_admin()
 );
 
 -- MESSAGES
 
-CREATE POLICY "conversation participants read messages"
+CREATE POLICY "conversation participants or admins read messages"
 ON public.messages
 FOR SELECT
 USING (
-EXISTS (
-SELECT 1
-FROM public.conversation_members cm
-WHERE cm.conversation_id = messages.conversation_id
-AND cm.user_id = auth.uid()
-)
+public.is_platform_admin()
+OR public.is_conversation_member(messages.conversation_id, auth.uid())
 );
 
 CREATE POLICY "conversation participants send messages"
@@ -344,12 +405,7 @@ ON public.messages
 FOR INSERT
 WITH CHECK (
 sender_id = auth.uid()
-AND EXISTS (
-SELECT 1
-FROM public.conversation_members cm
-WHERE cm.conversation_id = messages.conversation_id
-AND cm.user_id = auth.uid()
-)
+AND public.is_conversation_member(messages.conversation_id, auth.uid())
 );
 
 -- MAINTENANCE TICKETS

@@ -24,15 +24,17 @@ Property work is often spread across spreadsheets, chat threads, payment screens
 - Add properties with an image, country, address and units.
 - Define unit descriptions and rent amounts.
 - Review occupancy, rent collection and operational attention areas.
-- Invite managers and tenants with role-specific organization codes.
+- Invite managers and tenants with secure expiring invitation links; legacy role-specific codes remain available for compatibility.
 - View tenants and welfare states.
 - Communicate with managers and tenants.
 - Verify rent payments.
+- Switch between multiple organizations when the account has multiple active memberships.
+- Review notifications, tenancy lifecycle and move-out requests.
 - Update a profile, upload or remove a profile image, and delete the account.
 
 ### Managers
 
-- Join an existing landlord organization through a manager invite code.
+- Join an existing landlord organization through a secure manager invitation link.
 - View assigned organization properties and units.
 - Monitor occupancy and rent activity.
 - Review tenants and welfare indicators.
@@ -41,7 +43,7 @@ Property work is often spread across spreadsheets, chat threads, payment screens
 
 ### Tenants
 
-- Join an organization through a tenant invite code.
+- Join an organization through a secure tenant invitation link.
 - View their home and unit assignment.
 - See upcoming or outstanding rent information.
 - View welfare status.
@@ -74,7 +76,7 @@ Property work is often spread across spreadsheets, chat threads, payment screens
 3. Select the role that matches the code.
 4. NestTrack validates the role-specific code and associates the account with that organization.
 
-NestTrack currently uses invite codes rather than invite URLs. Codes are intended to be organization-scoped and role-scoped in production.
+NestTrack supports secure, expiring invitation links backed by hashed tokens. Legacy organization-scoped invite codes remain supported for backward compatibility.
 
 ### Sign in
 
@@ -86,7 +88,7 @@ Managers and landlords can verify a pending payment. In Supabase mode, a databas
 
 ### Manage maintenance
 
-Maintenance tickets are presented in three operational columns: **Open**, **In progress** and **Resolved**. Operations users can assign an open issue and resolve an issue in progress. Ticket priority and tenant/unit context remain visible during the workflow.
+Maintenance tickets use four operational states: **Pending**, **In progress**, **Resolved** and **Closed**. Operations users transition tickets through the controlled workflow and every status/assignment change is recorded in ticket history. Ticket priority and tenant/unit context remain visible during the workflow.
 
 ## Demo data
 
@@ -108,7 +110,7 @@ Alice's invite codes:
 - Manager: `NT-MGR-A7K9`
 - Tenant: `NT-TEN-A2P4`
 
-Frank Wilson has a separate organization for testing organization isolation. Additional demo details are in [DEMO_DATA.md](DEMO_DATA.md).
+Frank Wilson has a separate organization for testing organization isolation. Demo credentials are documented in the source seed data and should not be used in production.
 
 > Demo credentials are for local evaluation only. Rotate or remove them before any public deployment.
 
@@ -211,10 +213,10 @@ For a complete deployment checklist, see [PRODUCTION_SETUP.md](PRODUCTION_SETUP.
 - The browser must receive only the Supabase anon key. Never expose a service-role key in Vite environment variables.
 - Row Level Security is the authoritative authorization boundary. Test policies with landlord, manager, tenant and administrator accounts before launch.
 - Organization membership and role checks should be tested for every read and mutation path.
-- Invite codes should support expiry, maximum uses and revocation in production.
+- Secure invitation links use hashed tokens, expiry, maximum uses and revocation; legacy invite codes remain only for backward compatibility.
 - Demo credentials and hard-coded seed records must be removed or rotated before public release.
 - Configure private storage buckets and storage policies for property images and payment receipts before enabling those production workflows.
-- Enable Realtime for messages, payments, maintenance tickets and welfare checks when live updates are required.
+- Enable Supabase Realtime replication for messages, notifications, payments, maintenance tickets and welfare checks before launch.
 - Add backups, monitoring, error reporting and a recovery procedure before handling real tenant or financial data.
 
 ## Current limitations
@@ -223,7 +225,7 @@ NestTrack is an evolving product prototype. The current implementation has sever
 
 - Local demo data is browser-local and is not shared between devices or users.
 - The local demo does not provide real payment processing; payment verification is a workflow state change.
-- Some production data such as messages, property imagery and payment receipts needs further integration in the Supabase-backed UI.
+- Property imagery and payment receipts still need private Supabase Storage integration; messaging and operational live refresh are implemented when Realtime is enabled.
 - The current interface focuses on core operational flows rather than full lease, accounting and document management.
 - Invite-code administration, role changes and detailed audit history need a more complete management experience.
 - Accessibility, localization, automated testing and observability should be expanded before a public launch.
@@ -233,7 +235,7 @@ NestTrack is an evolving product prototype. The current implementation has sever
 ### Near term
 
 - Add automated unit, component and end-to-end tests for authentication, organization isolation, payment verification and ticket transitions.
-- Complete Supabase realtime subscriptions so messages and operational records update without manual refreshes.
+- Add automated tests and monitoring around the implemented Supabase Realtime subscriptions.
 - Add tenant maintenance submission, payment receipt upload and payment history details.
 - Add property image and payment-receipt storage flows with private, organization-scoped policies.
 - Improve invite management with expiry, revocation, usage limits and resend workflows.
@@ -265,3 +267,52 @@ Document new environment variables, SQL changes, role permissions and user-visib
 ## License
 
 No license has been declared for this repository yet. Add an explicit license before distributing the project or accepting external contributions.
+
+
+## Feature expansion migration
+
+The October 2026 feature expansion is delivered as a forward-only migration:
+
+```text
+supabase/migrations/20261005_feature_expansion.sql
+supabase/migrations/20261005_platform_admin_messaging.sql
+```
+
+The conversation-policy recursion fix is delivered as a follow-up migration:
+
+```text
+supabase/migrations/20261006_fix_conversation_members_rls_recursion.sql
+```
+
+Apply the recursion-fix migration after the feature-expansion and platform-admin messaging migrations. It installs a security-definer membership helper and replaces policies that queried `conversation_members` recursively during their own RLS evaluation.
+
+Apply it **after** `supabase/schema.sql` and the existing security/onboarding SQL on an existing Supabase installation. The migration adds:
+
+- Multiple active organization memberships with an explicit active-organization client context.
+- Secure invitation links with hashed, expiring tokens and role validation.
+- Organization settings/status/limits and server-side property/unit limit checks.
+- Explicit tenancy and move-out lifecycle with atomic assignment and approval RPCs.
+- In-app notifications and unread/read handling.
+- Pending → In progress → Resolved → Closed ticket workflow and immutable ticket history.
+- Organization-scoped conversation/message loading and participant checks.
+- Additional RLS policies and security-definer RPCs for privileged multi-row workflows.
+- Safer property/unit/tenant/landlord/account deletion paths.
+
+### Production verification
+
+```bash
+npm ci
+npm run typecheck
+npm run build
+```
+
+Do not deploy from an archive containing `node_modules`. A clean install must be performed on the deployment/CI platform so Vite/Rolldown installs the native dependency for that platform.
+
+The browser environment must contain only:
+
+```text
+VITE_SUPABASE_URL
+VITE_SUPABASE_ANON_KEY
+```
+
+Never add a Supabase service-role/secret key to Vite environment variables or frontend source.

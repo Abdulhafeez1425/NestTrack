@@ -1,26 +1,50 @@
 -- Secure onboarding RPC used by the browser after Supabase Auth signup.
 create or replace function public.finish_onboarding(
-  p_full_name text, p_role text, p_org_name text default null, p_invite_code text default null
-) returns uuid language plpgsql security definer set search_path=public as $$
-declare uid uuid:=auth.uid(); oid uuid; inv invite_codes%rowtype;
+  p_full_name text,
+  p_role text,
+  p_org_name text default null,
+  p_invite_code text default null
+) returns uuid
+language plpgsql
+security definer
+set search_path=public
+as $$
+declare
+  uid uuid := auth.uid();
+  oid uuid;
+  inv invite_codes%rowtype;
 begin
- if uid is null then raise exception 'Not authenticated'; end if;
- if p_role='landlord' then
-   insert into profiles(id,full_name,email,role) select uid,p_full_name,email,'landlord' from auth.users where id=uid
-   on conflict(id) do update set full_name=excluded.full_name,role='landlord';
-   insert into organizations(name) values(coalesce(nullif(trim(p_org_name),''),p_full_name||' Properties')) returning id into oid;
-   insert into organization_members(organization_id,user_id,role) values(oid,uid,'landlord');
- else
-   select * into inv from invite_codes where code=p_invite_code and active=true and role=p_role and (expires_at is null or expires_at>now()) and (max_uses is null or used_count<max_uses) for update;
-   if not found then raise exception 'Invalid or expired invite code'; end if;
-   insert into profiles(id,full_name,email,role) select uid,p_full_name,email,p_role from auth.users where id=uid
-   on conflict(id) do update set full_name=excluded.full_name,role=excluded.role;
-   insert into organization_members(organization_id,user_id,role) values(inv.organization_id,uid,p_role);
-   update invite_codes set used_count=used_count+1 where id=inv.id;
-   oid:=inv.organization_id;
- end if;
- return oid;
+  if uid is null then raise exception 'Not authenticated'; end if;
+  if p_role not in ('landlord','manager','tenant') then
+    raise exception 'Invalid NestTrack role';
+  end if;
+
+  -- Every account gets a profile. Organization membership is deliberately
+  -- separate from account creation for managers and tenants.
+  insert into profiles(id,full_name,email,role)
+  select uid,p_full_name,email,p_role from auth.users where id=uid
+  on conflict(id) do update set
+    full_name=excluded.full_name,
+    role=excluded.role,
+    email=coalesce(excluded.email,profiles.email);
+
+  if p_role='landlord' then
+    if nullif(trim(p_org_name),'') is null then
+      raise exception 'Organization name is required for landlord accounts';
+    end if;
+    insert into organizations(name) values(trim(p_org_name)) returning id into oid;
+    insert into organization_members(organization_id,user_id,role)
+    values(oid,uid,'landlord')
+    on conflict (organization_id,user_id) do update set role='landlord',status='active';
+    return oid;
+  end if;
+
+  -- Manager and tenant accounts are independent accounts. They do not need
+  -- an invite code at signup. Membership is granted only by the secure
+  -- invitation-link acceptance RPC after authentication.
+  return null;
 end $$;
+
 grant execute on function public.finish_onboarding(text,text,text,text) to authenticated;
 
 create or replace function public.ensure_organization_invite_codes()
@@ -41,7 +65,7 @@ begin
      if not exists(select 1 from public.invite_codes where organization_id=org.organization_id and role=invite_role and active=true) then
        code_prefix:=case when invite_role='manager' then 'NT-MGR-' else 'NT-TEN-' end;
        loop
-         generated_code:=code_prefix||upper(encode(gen_random_bytes(5),'hex'));
+         generated_code:=code_prefix||upper(encode(extensions.gen_random_bytes(5),'hex'));
          insert into public.invite_codes(organization_id,code,role,created_by)
          values(org.organization_id,generated_code,invite_role,uid)
          on conflict(code) do nothing;
