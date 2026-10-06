@@ -1,4 +1,4 @@
-import { supabase, isSupabaseConfigured } from './supabase';
+import { supabase, isSupabaseConfigured } from '../supabase';
 
 export type BackendRole = 'admin'|'landlord'|'manager'|'tenant';
 export type Membership = {organization_id:string; user_id:string; role:'landlord'|'manager'|'tenant'; status:string; permissions?:Record<string,boolean>};
@@ -14,6 +14,7 @@ export type Workspace = {
   tickets:any[];
   notifications:any[];
   tenancies:any[];
+  channels:any[];
 };
 
 const requireSupabase=()=>{if(!supabase)throw new Error('Supabase is not configured');return supabase;};
@@ -50,7 +51,7 @@ export async function loadWorkspace(userId:string, requestedOrganizationId?:stri
 
   const [
     orgRes, membersRes, propsRes, unitsRes, tenRes, payRes, welfareRes,
-    ticketRes, historyRes, cashRes, convRes, convMembersRes, messageRes, notificationRes
+    ticketRes, historyRes, cashRes, convRes, convMembersRes, messageRes, notificationRes, channelsRes, channelMembersRes
   ]=await Promise.all([
     admin?db.from('organizations').select('*'):db.from('organizations').select('*').in('id',orgIds),
     admin?db.from('organization_members').select('*').eq('status','active'):hasOrganization?db.from('organization_members').select('*').eq('organization_id',activeOrganizationId).eq('status','active'):db.from('organization_members').select('*').in('organization_id',[]),
@@ -65,18 +66,35 @@ export async function loadWorkspace(userId:string, requestedOrganizationId?:stri
     admin?db.from('conversations').select('*'):db.from('conversations').select('*'),
     db.from('conversation_members').select('*'),
     db.from('messages').select('*').order('created_at',{ascending:true}).limit(1000),
-    db.from('notifications').select('*').eq('recipient_user_id',userId).order('created_at',{ascending:false}).limit(100)
+    db.from('notifications').select('*').eq('recipient_user_id',userId).order('created_at',{ascending:false}).limit(100),
+    db.from('channels').select('*'),
+    db.from('channel_members').select('*')
   ]);
 
-  for(const r of [orgRes,membersRes,propsRes,unitsRes,tenRes,payRes,welfareRes,ticketRes,cashRes,convRes,convMembersRes,messageRes,notificationRes]){
+  for(const r of [orgRes,membersRes,propsRes,unitsRes,tenRes,payRes,welfareRes,ticketRes,cashRes,convRes,convMembersRes,messageRes,notificationRes,channelsRes,channelMembersRes]){
     if(r.error)throw r.error;
   }
 
-  const memberUserIds=Array.from(new Set((membersRes.data||[]).map((m:any)=>m.user_id).concat([userId])));
-  const {data:profiles,error:profilesError}=admin
-    ? await db.from('profiles').select('*')
-    : await db.from('profiles').select('*').in('id',memberUserIds);
-  if(profilesError)throw profilesError;
+  // The platform directory is intentionally separate from organization data.
+  // It lets authenticated users discover message recipients without granting
+  // them direct access to arbitrary organization records.
+  const {data:directory,error:directoryError}=await db.rpc('get_user_directory');
+  if(directoryError)throw directoryError;
+  const directoryRows=(directory||[]) as any[];
+  const profileMap=new Map<string,any>();
+  for(const row of directoryRows){
+    const existing=profileMap.get(row.user_id);
+    if(existing){
+      if(row.organization_id) existing.directoryOrganizations.push({id:row.organization_id,name:row.organization_name});
+    } else {
+      profileMap.set(row.user_id,{
+        id:row.user_id, full_name:row.full_name, email:row.email, phone:row.phone,
+        avatar_url:row.avatar_url, role:row.role,
+        directoryOrganizations:row.organization_id?[{id:row.organization_id,name:row.organization_name}]:[]
+      });
+    }
+  }
+  const profiles=Array.from(profileMap.values());
 
   const role:BackendRole=admin?'admin':((memberships.find(m=>m.organization_id===activeOrganizationId)?.role||profileData.role) as BackendRole);
   if(!role||!['admin','landlord','manager','tenant'].includes(role))throw new Error('Your NestTrack profile has no valid role.');
@@ -85,7 +103,7 @@ export async function loadWorkspace(userId:string, requestedOrganizationId?:stri
     id:o.id,name:o.name,ownerId:o.created_by||'',
     inviteManager:'',inviteTenant:'',status:o.status,slug:o.slug,settings:o.settings
   }));
-  const activeOrg=orgs.find(o=>o.id===activeOrganizationId)||{id:'platform',name:'NestTrack Platform',ownerId:'',inviteManager:'',inviteTenant:'',status:'active'};
+  const activeOrg=orgs.find((o:any)=>o.id===activeOrganizationId)||{id:'platform',name:'NestTrack Platform',ownerId:'',inviteManager:'',inviteTenant:'',status:'active'};
 
   const users=(profiles||[]).map((p:any)=>{
     const ms=(membersRes.data||[]).filter((m:any)=>m.user_id===p.id);
@@ -94,7 +112,7 @@ export async function loadWorkspace(userId:string, requestedOrganizationId?:stri
     return {
       id:p.id,name:p.full_name,email:p.email,phone:p.phone||'',avatar_url:p.avatar_url||undefined,password:'',
       role:(p.id===userId?role:(m?.role||p.role)) as BackendRole,
-      orgId:m?.organization_id||activeOrganizationId||'',welfare:welfare?.status||'Good',
+      orgId:m?.organization_id||'',welfare:welfare?.status||'Good',
       memberships:ms.map((x:any)=>({organizationId:x.organization_id,role:x.role,status:x.status,permissions:x.permissions||{}}))
     };
   });
@@ -114,6 +132,10 @@ export async function loadWorkspace(userId:string, requestedOrganizationId?:stri
   const payments=(payRes.data||[]).map((p:any)=>({id:p.id,tenantId:p.tenant_id,amount:Number(p.amount_due),due:p.due_date,status:p.status,method:p.method||''}));
   const tickets=(ticketRes.data||[]).map((t:any)=>({id:t.id,tenantId:t.tenant_id,title:t.title,description:t.description||'',category:t.category||'',status:t.status,priority:t.priority,assignedTo:t.assigned_to,propertyId:t.property_id,unitId:t.unit_id,history:(historyRes.data||[]).filter((h:any)=>h.ticket_id===t.id)}));
   const cashflow=(cashRes.data||[]).map((c:any)=>({id:c.id,landlordId:c.landlord_id,orgId:c.organization_id,paymentId:c.payment_id||'',tenantId:c.tenant_id||'',amount:Number(c.amount),type:c.type,status:c.status,timestamp:c.recorded_at,method:c.method||''}));
+  const channelRows=(channelsRes.data||[]) as any[];
+  const channelMembers=(channelMembersRes.data||[]) as any[];
+  const channels=channelRows.map((c:any)=>({id:c.id,name:c.name,type:c.channel_type,visibility:c.visibility,organizationId:c.organization_id||null,propertyId:c.property_id||null,conversationId:c.conversation_id,members:channelMembers.filter((m:any)=>m.channel_id===c.id).map((m:any)=>m.user_id)}));
+  const channelByConversation=new Map(channels.map((c:any)=>[c.conversationId,c]));
   const convIds=new Set((convMembersRes.data||[]).filter((m:any)=>m.user_id===userId).map((m:any)=>m.conversation_id));
   const visibleMessages=(messageRes.data||[]).filter((m:any)=>convIds.has(m.conversation_id));
   const participantPairs=(convMembersRes.data||[]).reduce((map:any,m:any)=>{
@@ -125,7 +147,8 @@ export async function loadWorkspace(userId:string, requestedOrganizationId?:stri
   },{});
   const messages=visibleMessages.map((m:any)=>{
     const other=participantPairs[`${m.conversation_id}:${m.sender_id}`]||'';
-    return {id:m.id,from:m.sender_id,to:other,text:m.body,time:new Date(m.created_at).toLocaleTimeString([], {hour:'numeric',minute:'2-digit'}),conversationId:m.conversation_id,readAt:m.read_at};
+    const channel=channelByConversation.get(m.conversation_id);
+    return {id:m.id,from:m.sender_id,to:other,text:m.body,time:new Date(m.created_at).toLocaleTimeString([], {hour:'numeric',minute:'2-digit'}),conversationId:m.conversation_id,channelId:channel?.id,readAt:m.read_at};
   });
   const tenancies=(tenRes.data||[]).map((t:any)=>({
     id:t.id,organizationId:t.organization_id,unitId:t.unit_id,tenantId:t.tenant_id,
@@ -138,7 +161,7 @@ export async function loadWorkspace(userId:string, requestedOrganizationId?:stri
   return {
     current:{id:userId,name:profileData.full_name,email:profileData.email,password:'',role,orgId:activeOrganizationId||'',welfare:'Good',
       memberships:memberships.map(m=>({organizationId:m.organization_id,role:m.role,status:m.status,permissions:m.permissions||{}}))},
-    memberships,users,orgs,props:properties,payments,cashflow,messages,tickets,notifications,tenancies
+    memberships,users,orgs,props:properties,payments,cashflow,messages,tickets,notifications,tenancies,channels
   };
 }
 
@@ -146,10 +169,38 @@ export async function signIn(email:string,password:string){const db=requireSupab
 export async function signOut(){if(supabase)await supabase.auth.signOut();}
 
 export async function createOrganization(name:string,slug?:string){const db=requireSupabase();const {data,error}=await db.rpc('create_organization',{p_name:name,p_slug:slug||null});if(error)throw error;return data;}
-export async function createProperty(organization_id:string,name:string,address:string,units:{name:string;description?:string;rent:number}[]=[]){
+async function uploadPropertyImage(organizationId:string,file:File){
   const db=requireSupabase();
-  const {data,error}=await db.rpc('create_property_with_units',{p_organization_id:organization_id,p_name:name,p_address:address,p_units:units.map(u=>({name:u.name,description:u.description||'',rent:u.rent}))});
+  if(!file.type.startsWith('image/'))throw new Error('Choose an image file.');
+  if(file.size>10*1024*1024)throw new Error('Property images must be 10 MB or smaller.');
+  const extension=file.name.split('.').pop()?.replace(/[^a-zA-Z0-9]/g,'')||'jpg';
+  const path=`${(await db.auth.getUser()).data.user?.id}/${organizationId}/${crypto.randomUUID()}.${extension}`;
+  const {error}=await db.storage.from('property-images').upload(path,file,{contentType:file.type,upsert:false});
+  if(error)throw error;
+  return db.storage.from('property-images').getPublicUrl(path).data.publicUrl;
+}
+
+export async function createProperty(organization_id:string,name:string,address:string,units:{name:string;description?:string;rent:number}[]=[],imageUrl?:string,imageFile?:File){
+  const db=requireSupabase();
+  const propertyImage=imageFile?await uploadPropertyImage(organization_id,imageFile):imageUrl||null;
+  const {data,error}=await db.rpc('create_property_with_units',{p_organization_id:organization_id,p_name:name,p_address:address,p_units:units.map(u=>({name:u.name,description:u.description||'',rent:u.rent})),p_image_url:propertyImage});
   if(error)throw error;return data;
+}
+export async function updateProperty(id:string,organizationId:string,name:string,address:string,imageUrl:string,imageFile?:File){
+  const db=requireSupabase();
+  const propertyImage=imageFile?await uploadPropertyImage(organizationId,imageFile):imageUrl||null;
+  const {error}=await db.rpc('update_property_as_landlord',{p_property_id:id,p_name:name,p_address:address,p_image_url:propertyImage});
+  if(error)throw error;
+}
+export async function createUnit(propertyId:string,name:string,description:string,rent:number){
+  const db=requireSupabase();
+  const {data,error}=await db.rpc('create_unit_as_landlord',{p_property_id:propertyId,p_label:name,p_description:description,p_rent_amount:rent});
+  if(error)throw error;return data;
+}
+export async function updateUnit(id:string,name:string,description:string,rent:number){
+  const db=requireSupabase();
+  const {error}=await db.rpc('update_unit_as_landlord',{p_unit_id:id,p_label:name,p_description:description,p_rent_amount:rent});
+  if(error)throw error;
 }
 export async function verifyPayment(id:string){
   const db=requireSupabase();const {data:{user}}=await db.auth.getUser();
@@ -176,6 +227,13 @@ export async function sendDirectMessage(otherUserId:string,body:string,organizat
   const {error}=await db.from('messages').insert({conversation_id:cid,sender_id:user!.id,body});
   if(error)throw error;
 }
+
+export async function createChannel(input:{name:string;type:'property'|'organization'|'shared'|'platform';visibility:'private'|'organization'|'cross_organization'|'platform';organizationId?:string|null;propertyId?:string|null;memberIds?:string[]}){
+  const db=requireSupabase();const {data,error}=await db.rpc('create_channel',{p_name:input.name,p_channel_type:input.type,p_visibility:input.visibility,p_organization_id:input.organizationId||null,p_property_id:input.propertyId||null,p_member_ids:input.memberIds||[]});if(error)throw error;return data as string;
+}
+export async function addChannelMember(channelId:string,userId:string){const db=requireSupabase();const {error}=await db.rpc('add_channel_member',{p_channel_id:channelId,p_user_id:userId});if(error)throw error;}
+export async function removeChannelMember(channelId:string,userId:string){const db=requireSupabase();const {error}=await db.rpc('remove_channel_member',{p_channel_id:channelId,p_user_id:userId});if(error)throw error;}
+export async function sendChannelMessage(channelId:string,body:string){const db=requireSupabase();const {data:channel,error:channelError}=await db.from('channels').select('conversation_id').eq('id',channelId).single();if(channelError)throw channelError;const {data:{user}}=await db.auth.getUser();if(!user)throw new Error('You must be signed in to send messages.');const {error}=await db.from('messages').insert({conversation_id:channel.conversation_id,sender_id:user.id,body});if(error)throw error;}
 export async function markConversationRead(conversationId:string){const db=requireSupabase();const {error}=await db.rpc('mark_conversation_read',{p_conversation_id:conversationId});if(error)throw error;}
 export async function markNotificationRead(id:string){const db=requireSupabase();const {error}=await db.from('notifications').update({read_at:new Date().toISOString()}).eq('id',id).eq('recipient_user_id',(await db.auth.getUser()).data.user?.id);if(error)throw error;}
 export async function markAllNotificationsRead(){const db=requireSupabase();const uid=(await db.auth.getUser()).data.user?.id;if(!uid)return;const {error}=await db.from('notifications').update({read_at:new Date().toISOString()}).eq('recipient_user_id',uid).is('read_at',null);if(error)throw error;}

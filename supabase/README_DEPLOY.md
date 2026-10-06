@@ -6,6 +6,7 @@
    - `migrations/20261005_feature_expansion.sql`
    - `migrations/20261005_platform_admin_messaging.sql`
    - `migrations/20261006_fix_conversation_members_rls_recursion.sql`
+   - `migrations/20261006_clean_architecture.sql`
 4. Copy Project URL and anon key into `.env` from `.env.example`.
 5. Create the first platform admin by running:
 

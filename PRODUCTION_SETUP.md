@@ -20,7 +20,11 @@ Then apply:
 
 `supabase/migrations/20261006_fix_conversation_members_rls_recursion.sql`
 
-This final migration must run after the feature-expansion and platform-admin messaging migrations. It replaces the recursive `conversation_members` policies with policies that call the `SECURITY DEFINER` `is_conversation_member()` helper.
+Then apply:
+
+`supabase/migrations/20261006_clean_architecture.sql`
+
+The recursion-fix migration must run after the feature-expansion and platform-admin messaging migrations. The clean-architecture migration must run last; it adds property/organization/shared/platform channels and uses a security-definer `is_channel_member()` helper to avoid recursive channel-membership RLS evaluation.
 
 Do not replace production SQL by copying a fresh schema over an existing database. The feature-expansion migration is designed to extend the existing installation without silently destroying data. The schema includes organizations, memberships, properties, units, tenancies, payments, welfare, conversations, messages, maintenance, audit events, platform admins, invite codes and the cashflow ledger.
 

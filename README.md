@@ -27,6 +27,7 @@ Property work is often spread across spreadsheets, chat threads, payment screens
 - Invite managers and tenants with secure expiring invitation links; legacy role-specific codes remain available for compatibility.
 - View tenants and welfare states.
 - Communicate with managers and tenants.
+- Use property and organization channels alongside direct messages; landlords and managers can create channels and manage members.
 - Verify rent payments.
 - Switch between multiple organizations when the account has multiple active memberships.
 - Review notifications, tenancy lifecycle and move-out requests.
@@ -40,6 +41,7 @@ Property work is often spread across spreadsheets, chat threads, payment screens
 - Review tenants and welfare indicators.
 - Verify payments and progress maintenance tickets from Open to In progress to Resolved.
 - Communicate with tenants and landlords.
+- Post in organization/property channels and manage channel membership.
 
 ### Tenants
 
@@ -48,6 +50,7 @@ Property work is often spread across spreadsheets, chat threads, payment screens
 - See upcoming or outstanding rent information.
 - View welfare status.
 - Exchange direct messages with relevant people.
+- Read and post in channels available to the tenancy or property.
 - Follow maintenance issues associated with their tenancy.
 - Maintain personal contact details and profile image.
 
@@ -178,7 +181,7 @@ The production schema is organized around an organization boundary:
 - `tenancies` connect tenants to units and rent terms.
 - `payments` store due dates, amounts, status, payment method and verification metadata.
 - `welfare_checks` store tenant welfare states and notes.
-- `conversations`, `conversation_members` and `messages` support direct communication.
+- `channels` and `channel_members` define property, organization, shared and platform communication spaces; each channel owns a `conversation`, so `conversation_members` and `messages` provide the shared message and read-state model.
 - `maintenance_tickets` store property issues, priority, assignment and workflow status.
 - `audit_events` provides a foundation for operational history.
 - `invite_codes` stores role-specific onboarding codes.
