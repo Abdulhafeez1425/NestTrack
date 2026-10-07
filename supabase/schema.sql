@@ -141,6 +141,9 @@ create trigger payments_cashflow_trigger after update on payments for each row e
 -- Profile image storage (run once in Supabase SQL editor)
 insert into storage.buckets (id, name, public) values ('avatars', 'avatars', true)
 on conflict (id) do update set public = true;
+drop policy if exists "Avatar images are publicly readable" on storage.objects;
+drop policy if exists "Users upload their own avatar" on storage.objects;
+drop policy if exists "Users update their own avatar" on storage.objects;
 create policy "Avatar images are publicly readable" on storage.objects for select using (bucket_id = 'avatars');
 create policy "Users upload their own avatar" on storage.objects for insert with check (bucket_id = 'avatars' and (storage.foldername(name))[1] = auth.uid()::text);
 create policy "Users update their own avatar" on storage.objects for update using (bucket_id = 'avatars' and (storage.foldername(name))[1] = auth.uid()::text);

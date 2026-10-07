@@ -5,7 +5,7 @@ NestTrack is a responsive property-operations web app for landlords, managers, t
 ## Current capabilities
 
 - Role-aware landlord, manager, tenant, technician, and platform-admin views.
-- Organization/property/unit and tenancy management, rent records, and landlord-managed payment instructions pinned in the tenant Payments page.
+- Organization/property/unit and tenancy management, rent records, landlord-managed payment instructions, and private tenant receipt-image uploads covering one or more selected months. Rent submissions stay Pending until the landlord confirms them.
 - Maintenance tickets visible to the organization’s technicians, assignable/removable by operations users, with technician quotes and tenant payment evidence.
 - Tenant-submitted bank reference or receipt number, technician confirmation, a second landlord/manager review for disputed payments or quotes at/above the configured threshold, and an immutable ticket payment-event trail.
 - Direct and channel messaging. Senders can edit messages or soft-delete them; participants can inspect prior versions. Soft-deleted messages remain available for 365 days before an administrator may purge eligible records.
@@ -56,6 +56,6 @@ npm run preview    # Preview the build locally
 
 ## Payment and message lifecycle
 
-For a repair bill, the technician submits a quote, an authorized landlord/manager approves it, the tenant pays outside NestTrack and submits a bank reference/receipt number, and the assigned technician verifies receipt. A landlord/manager must review a disputed payment and payments at or above the organization’s high-value threshold (defaults to ₦100,000 and can be changed in the Payments page).
+For rent, the tenant pays outside NestTrack, selects the month(s) covered, and uploads a private receipt image. The payment stays Pending until the landlord confirms it; confirmation marks the selected rent records paid. For a repair bill, the technician submits a quote, an authorized landlord/manager approves it, the tenant pays outside NestTrack and submits a bank reference/receipt number, and the assigned technician verifies receipt. A landlord/manager must review a disputed repair payment and payments at or above the organization’s high-value threshold (defaults to ₦100,000 and can be changed in the Payments page).
 
 Message edits create immutable prior-version entries; deletion replaces the visible body with a deletion marker rather than removing the row. An authorized platform administrator can run the retention RPC to purge only soft-deleted messages and history at least 365 days old. See the security guide for operational details.

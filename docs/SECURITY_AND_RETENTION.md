@@ -2,13 +2,17 @@
 
 ## Payment evidence and review
 
-NestTrack does not process, hold, or settle payments. A tenant makes the bank transfer outside NestTrack and must submit a non-empty bank reference or receipt number on the maintenance ticket. That evidence is recorded with the submitting user and timestamp before the assigned technician can confirm receipt.
+NestTrack does not process, hold, or settle payments. For rent, the tenant selects one or more unpaid months, makes the bank transfer outside NestTrack, and uploads an image of the receipt. The grouped submission is recorded as **Pending** until the landlord confirms it; confirmation marks its selected rent rows paid. Confirmation is an administrative record, not proof of bank settlement.
+
+Rent proof images live in the private `rent-payment-proofs` storage bucket. Authenticated tenants can upload only into their own folder; the submitting tenant and active organization landlords/managers can view a signed image link. The submission RPC verifies the tenant owns every selected rent row, rejects duplicate pending submissions, and derives the total and months from the database rows. Use the existing bank records to reconcile transfers independently.
+
+For a maintenance ticket, the tenant submits a non-empty bank reference or receipt number rather than an uploaded file. That evidence is recorded with the submitting user and timestamp before the assigned technician can confirm receipt.
 
 The organization’s landlord can set the high-value review threshold in Payments. The default is ₦100,000. When the technician confirms a payment at or above the threshold, the ticket moves to **Pending landlord review** rather than a final paid state. A tenant can dispute submitted or confirmed evidence; disputes are also routed for landlord/manager review. Only an authorized landlord/manager can approve or keep a payment disputed. If a dispute is resolved before any technician confirmation, it returns to **Evidence submitted**—manager approval alone does not mark it paid, and the assigned technician must still verify receipt. If the technician has already confirmed, landlord/manager approval can finalize a payment that was disputed or met the high-value threshold.
 
 Every evidence submission, resubmission, technician confirmation, dispute, and manager review creates a row in `public.ticket_payment_events`. The app displays recent events on the ticket. These rows are append-only to normal authenticated users; authorization to read is limited to the ticket tenant, assigned technician, organization landlord/manager, and platform administrator.
 
-Evidence currently means a **text reference/receipt number**, not an uploaded image or PDF. Do not put full bank-account numbers, card data, passwords, or unnecessary personal data in the reference or notes. Confirm bank settlement independently.
+Maintenance-ticket evidence currently means a **text reference/receipt number**, not an uploaded image or PDF. Do not put full bank-account numbers, card data, passwords, or unnecessary personal data in references or notes. Rent receipt images should show only the information needed to reconcile the transfer; avoid uploading unrelated personal or account data.
 
 ## Message history and deletion
 

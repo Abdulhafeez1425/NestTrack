@@ -11,6 +11,7 @@ export type Workspace = {
   payments:any[];
   cashflow:any[];
   messages:any[];
+  paymentSubmissions:any[];
   tickets:any[];
   notifications:any[];
   tenancies:any[];
@@ -50,7 +51,7 @@ export async function loadWorkspace(userId:string, requestedOrganizationId?:stri
   const scopedIds=admin?orgIds:hasOrganization?[activeOrganizationId]:[];
 
   const [
-    orgRes, membersRes, propsRes, unitsRes, tenRes, payRes, welfareRes,
+    orgRes, membersRes, propsRes, unitsRes, tenRes, payRes, paymentSubmissionsRes, welfareRes,
     ticketRes, historyRes, paymentEventsRes, cashRes, convRes, convMembersRes, messageRes, notificationRes, channelsRes, channelMembersRes
   ]=await Promise.all([
     admin?db.from('organizations').select('*'):db.from('organizations').select('*').in('id',orgIds),
@@ -59,6 +60,7 @@ export async function loadWorkspace(userId:string, requestedOrganizationId?:stri
     admin?db.from('units').select('*'):hasOrganization?db.from('units').select('*').eq('organization_id',activeOrganizationId):db.from('units').select('*').in('organization_id',[]),
     admin?db.from('tenancies').select('*'):hasOrganization?db.from('tenancies').select('*').eq('organization_id',activeOrganizationId):db.from('tenancies').select('*').in('organization_id',[]),
     admin?db.from('payments').select('*'):hasOrganization?db.from('payments').select('*').eq('organization_id',activeOrganizationId):db.from('payments').select('*').in('organization_id',[]),
+    admin?db.from('rent_payment_submissions').select('*').order('submitted_at',{ascending:false}):hasOrganization?db.from('rent_payment_submissions').select('*').eq('organization_id',activeOrganizationId).order('submitted_at',{ascending:false}):db.from('rent_payment_submissions').select('*').in('organization_id',[]).order('submitted_at',{ascending:false}),
     admin?db.from('welfare_checks').select('*').order('checked_at',{ascending:false}):hasOrganization?db.from('welfare_checks').select('*').eq('organization_id',activeOrganizationId).order('checked_at',{ascending:false}):db.from('welfare_checks').select('*').in('organization_id',[]).order('checked_at',{ascending:false}),
     admin?db.from('maintenance_tickets').select('*'):hasOrganization?db.from('maintenance_tickets').select('*').eq('organization_id',activeOrganizationId):db.from('maintenance_tickets').select('*').in('organization_id',[]),
     admin?db.from('ticket_history').select('*').order('created_at',{ascending:false}):hasOrganization?db.from('ticket_history').select('*').eq('organization_id',activeOrganizationId).order('created_at',{ascending:false}):db.from('ticket_history').select('*').in('organization_id',[]).order('created_at',{ascending:false}),
@@ -72,7 +74,7 @@ export async function loadWorkspace(userId:string, requestedOrganizationId?:stri
     db.from('channel_members').select('*')
   ]);
 
-  for(const r of [orgRes,membersRes,propsRes,unitsRes,tenRes,payRes,welfareRes,ticketRes,cashRes,convRes,convMembersRes,messageRes,notificationRes,channelsRes,channelMembersRes]){
+  for(const r of [orgRes,membersRes,propsRes,unitsRes,tenRes,payRes,paymentSubmissionsRes,welfareRes,ticketRes,cashRes,convRes,convMembersRes,messageRes,notificationRes,channelsRes,channelMembersRes]){
     if(r.error)throw r.error;
   }
 
@@ -139,7 +141,11 @@ export async function loadWorkspace(userId:string, requestedOrganizationId?:stri
       return {id:u.id,name:u.label,description:u.description||'',tenantId:tenancy?.tenant_id||u.current_tenant_id||undefined,rent:Number(tenancy?.rent_amount||u.rent_amount||0),status:u.status};
     })
   }));
-  const payments=(payRes.data||[]).map((p:any)=>({id:p.id,tenantId:p.tenant_id,amount:Number(p.amount_due),due:p.due_date,status:p.status,method:p.method||''}));
+  const payments=(payRes.data||[]).map((p:any)=>({id:p.id,tenantId:p.tenant_id,tenancyId:p.tenancy_id,amount:Number(p.amount_due),amountPaid:Number(p.amount_paid||0),due:p.due_date,status:p.status,method:p.method||'',receiptPath:p.receipt_path||null}));
+  const paymentSubmissions=await Promise.all((paymentSubmissionsRes.data||[]).map(async(s:any)=>{
+    const {data,error}=await db.storage.from('rent-payment-proofs').createSignedUrl(s.receipt_path,3600);
+    return {id:s.id,organizationId:s.organization_id,tenantId:s.tenant_id,paymentIds:s.payment_ids||[],months:(s.payment_months||[]).map((month:string)=>String(month).slice(0,7)),amount:Number(s.amount),status:s.status,receiptPath:s.receipt_path,receiptUrl:error?null:data?.signedUrl||null,submittedAt:s.submitted_at,confirmedBy:s.confirmed_by||null,confirmedAt:s.confirmed_at||null};
+  }));
   const tickets=(ticketRes.data||[]).map((t:any)=>({id:t.id,tenantId:t.tenant_id,title:t.title,description:t.description||'',category:t.category||'',status:t.status,priority:t.priority,assignedTo:t.assigned_to,propertyId:t.property_id,unitId:t.unit_id,history:(historyRes.data||[]).filter((h:any)=>h.ticket_id===t.id),paymentHistory:(paymentEventsRes.data||[]).filter((h:any)=>h.ticket_id===t.id),estimatedCost:t.estimated_cost==null?null:Number(t.estimated_cost),billingStatus:t.billing_status||'Not billable',paymentReference:t.payment_reference||null,paidConfirmedAt:t.paid_confirmed_at||null,paidConfirmedBy:t.paid_confirmed_by||null,tenantPaymentReference:t.tenant_payment_reference||null,reviewNote:t.payment_review_note||null}));
   const cashflow=(cashRes.data||[]).map((c:any)=>({id:c.id,landlordId:c.landlord_id,orgId:c.organization_id,paymentId:c.payment_id||'',tenantId:c.tenant_id||'',amount:Number(c.amount),type:c.type,status:c.status,timestamp:c.recorded_at,method:c.method||''}));
   const channelRows=(channelsRes.data||[]) as any[];
@@ -177,7 +183,7 @@ export async function loadWorkspace(userId:string, requestedOrganizationId?:stri
   return {
     current:{id:userId,name:profileData.full_name,email:profileData.email,password:'',role,orgId:activeOrganizationId||'',propertyId:ownProperty?.id,unit:ownUnit?.label,welfare:'Good',
       memberships:memberships.map(m=>({organizationId:m.organization_id,role:m.role,status:m.status,permissions:m.permissions||{}}))},
-    memberships,users,orgs,props:properties,payments,cashflow,messages,tickets,notifications,tenancies,channels
+    memberships,users,orgs,props:properties,payments,paymentSubmissions,cashflow,messages,tickets,notifications,tenancies,channels
   };
 }
 
@@ -219,9 +225,27 @@ export async function updateUnit(id:string,name:string,description:string,rent:n
   const {error}=await db.rpc('update_unit_as_landlord',{p_unit_id:id,p_label:name,p_description:description,p_rent_amount:rent});
   if(error)throw error;
 }
-export async function verifyPayment(id:string){
-  const db=requireSupabase();const {data:{user}}=await db.auth.getUser();
-  const {error}=await db.from('payments').update({status:'Paid',verified_by:user?.id,verified_at:new Date().toISOString()}).eq('id',id);
+export async function uploadRentPaymentProof(paymentIds:string[],organizationId:string,file:File){
+  const db=requireSupabase();
+  if(!paymentIds.length)throw new Error('Select at least one month to submit.');
+  if(!organizationId)throw new Error('Your active organization is missing.');
+  const extensions:Record<string,string>={'image/jpeg':'jpg','image/png':'png','image/webp':'webp','image/gif':'gif'};
+  const extension=extensions[file.type];
+  if(!extension)throw new Error('Upload a JPG, PNG, WebP, or GIF screenshot/image.');
+  if(file.size>10*1024*1024)throw new Error('Payment proof images must be 10 MB or smaller.');
+  const {data:{user},error:userError}=await db.auth.getUser();
+  if(userError)throw userError;
+  if(!user)throw new Error('Sign in before submitting payment proof.');
+  const path=`${organizationId}/${user.id}/${crypto.randomUUID()}.${extension}`;
+  const {error:uploadError}=await db.storage.from('rent-payment-proofs').upload(path,file,{contentType:file.type,upsert:false});
+  if(uploadError)throw uploadError;
+  const {data,error}=await db.rpc('submit_rent_payment_evidence',{p_payment_ids:paymentIds,p_receipt_path:path});
+  if(error)throw error;
+  return data as string;
+}
+export async function confirmRentPaymentSubmission(id:string){
+  const db=requireSupabase();
+  const {error}=await db.rpc('confirm_rent_payment_submission',{p_submission_id:id});
   if(error)throw error;
 }
 export async function updateTicket(id:string,status:string,assignee?:string,comment?:string){

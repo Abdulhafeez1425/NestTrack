@@ -18,6 +18,10 @@ Run `supabase/merged_deployment.sql` once from the Supabase SQL editor. It combi
 
 Treat `supabase/migrations/` as the migration source of truth. Determine which migrations are already applied, then apply each unapplied migration once, in the dependency order listed below. Never execute the merged fresh-install script on a live database, and do not rerun older migrations merely because they appear in the file list.
 
+### Duplicate avatar policy (`ERROR 42710`)
+
+If SQL reports that policy `Avatar images are publicly readable` already exists, do not delete the other SQL files. Run [`supabase/fixes/repair_avatar_storage_policies.sql`](../supabase/fixes/repair_avatar_storage_policies.sql) once; it safely drops and recreates the three avatar policies and can be rerun. If the merged script already ran partway, do **not** rerun the whole merged file against that database—check which objects/migrations succeeded and continue with only missing steps, or restart from a truly empty database for a fresh install.
+
 The merged file is generated from the canonical base SQL and the ordered migrations. After changing those sources, regenerate it with `npm run sql:merge`; do not edit the generated file by hand.
 
 Forward migrations, in order:
@@ -32,6 +36,9 @@ Forward migrations, in order:
 8. `20261006_messaging_end_to_end.sql`
 9. `20261007_technicians_messaging_billing.sql`
 10. `20261008_evidence_history_retention.sql`
+11. `20261009_rent_payment_proofs.sql`
+
+For the rent-proof workflow, apply `20261009_rent_payment_proofs.sql` to an existing database before deploying the matching frontend. It creates the private receipt bucket, submission table, RLS policies, and upload/confirmation RPCs. Apply only once per database using your migration ledger; do not rerun the fresh-install SQL against an existing database.
 
 Base installation files are `supabase/schema.sql`, `supabase/rls.sql`, `supabase/profile_deletion.sql`, and `supabase/onboarding.sql`; the consolidated file contains these before the forward migrations. `LOGIN_DIAGNOSTIC.sql` is an ad-hoc diagnostic, not a deployment migration.
 
@@ -60,13 +67,16 @@ Landlords invite managers, tenants, and technicians with secure role-scoped link
 
 ## 5. Storage and Realtime
 
-This release uses a text bank/receipt reference as payment evidence; it does not upload a financial receipt file. Configure private Storage buckets only for features that are actually enabled. Enable Supabase Realtime for messages, notifications, and ticket changes if live refresh is required.
+Rent-payment proofs are stored in the private `rent-payment-proofs` bucket created by the latest migration. Receipts are shown through short-lived signed URLs to the tenant and active organization landlord/manager. Configure this bucket only through the migration; do not make it public. Enable Supabase Realtime for messages, notifications, and ticket changes if live refresh is required.
 
 ## 6. Staging acceptance checklist
 
 Test using separate Supabase accounts for landlord, manager, tenant, and technician:
 
 - Verify a tenant cannot see another tenant’s tickets or submit evidence for another ticket.
+- Verify a tenant can select one or more unpaid rent months, upload an image, and sees the submission as Pending; the landlord sees the same private proof and can confirm it.
+- Verify confirmation marks every selected rent row paid, records the confirming landlord and timestamp, and updates cashflow; a tenant cannot confirm or attach another tenant’s payment rows.
+- Verify a tenant cannot read another tenant’s receipt object, and an unconfirmed submission does not mark rent paid.
 - Verify only the assigned technician can confirm submitted evidence.
 - Verify payment confirmation at/above the configured threshold remains pending landlord/manager review.
 - Verify a tenant dispute routes to the review queue and approval/dispute decisions create audit events.
