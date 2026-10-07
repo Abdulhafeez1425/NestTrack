@@ -151,7 +151,10 @@ export async function loadWorkspace(userId:string, requestedOrganizationId?:stri
   const participantPairs=(convMembersRes.data||[]).reduce((map:any,m:any)=>{
     if(!convIds.has(m.conversation_id))return map;
     const members=(convMembersRes.data||[]).filter((x:any)=>x.conversation_id===m.conversation_id);
-    const other=members.find((x:any)=>x.user_id!==userId);
+    // Map each sender to the other conversation participant. Comparing to the
+    // logged-in user here mis-mapped inbound messages as addressed to the
+    // sender, causing the direct-thread UI filter to hide them.
+    const other=members.find((x:any)=>x.user_id!==m.user_id);
     if(other)map[`${m.conversation_id}:${m.user_id}`]=other.user_id;
     return map;
   },{});
