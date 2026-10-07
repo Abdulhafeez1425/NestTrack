@@ -12,3 +12,12 @@
   .auth-form-panel{height:100%;min-height:0;overflow-y:auto;align-items:flex-start}
   .auth-form-panel>div{margin:auto}
 }
+
+/* Responsive workspace defaults: prevent long content and forms from widening the viewport. */
+main{min-width:0;max-width:100%;} .card{min-width:0;} img{max-width:100%;}
+@media (max-width:767px){
+  body{overflow-x:hidden;} .card{border-radius:15px;} .input{min-width:0;}
+  table{min-width:600px;} .overflow-x-auto{max-width:100%;}
+  h1{font-size:clamp(1.5rem,7vw,1.9rem)!important;line-height:1.12;}
+  .btn{padding:9px 11px;}
+}

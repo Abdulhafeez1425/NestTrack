@@ -1,7 +1,7 @@
 import { supabase, isSupabaseConfigured } from '../supabase';
 
-export type BackendRole = 'admin'|'landlord'|'manager'|'tenant';
-export type Membership = {organization_id:string; user_id:string; role:'landlord'|'manager'|'tenant'; status:string; permissions?:Record<string,boolean>};
+export type BackendRole = 'admin'|'landlord'|'manager'|'tenant'|'technician';
+export type Membership = {organization_id:string; user_id:string; role:'landlord'|'manager'|'tenant'|'technician'; status:string; permissions?:Record<string,boolean>};
 export type Workspace = {
   current:any;
   memberships: Membership[];
@@ -51,7 +51,7 @@ export async function loadWorkspace(userId:string, requestedOrganizationId?:stri
 
   const [
     orgRes, membersRes, propsRes, unitsRes, tenRes, payRes, welfareRes,
-    ticketRes, historyRes, cashRes, convRes, convMembersRes, messageRes, notificationRes, channelsRes, channelMembersRes
+    ticketRes, historyRes, paymentEventsRes, cashRes, convRes, convMembersRes, messageRes, notificationRes, channelsRes, channelMembersRes
   ]=await Promise.all([
     admin?db.from('organizations').select('*'):db.from('organizations').select('*').in('id',orgIds),
     admin?db.from('organization_members').select('*').eq('status','active'):hasOrganization?db.from('organization_members').select('*').eq('organization_id',activeOrganizationId).eq('status','active'):db.from('organization_members').select('*').in('organization_id',[]),
@@ -62,10 +62,11 @@ export async function loadWorkspace(userId:string, requestedOrganizationId?:stri
     admin?db.from('welfare_checks').select('*').order('checked_at',{ascending:false}):hasOrganization?db.from('welfare_checks').select('*').eq('organization_id',activeOrganizationId).order('checked_at',{ascending:false}):db.from('welfare_checks').select('*').in('organization_id',[]).order('checked_at',{ascending:false}),
     admin?db.from('maintenance_tickets').select('*'):hasOrganization?db.from('maintenance_tickets').select('*').eq('organization_id',activeOrganizationId):db.from('maintenance_tickets').select('*').in('organization_id',[]),
     admin?db.from('ticket_history').select('*').order('created_at',{ascending:false}):hasOrganization?db.from('ticket_history').select('*').eq('organization_id',activeOrganizationId).order('created_at',{ascending:false}):db.from('ticket_history').select('*').in('organization_id',[]).order('created_at',{ascending:false}),
+    admin?db.from('ticket_payment_events').select('*').order('created_at',{ascending:false}):hasOrganization?db.from('ticket_payment_events').select('*').eq('organization_id',activeOrganizationId).order('created_at',{ascending:false}):db.from('ticket_payment_events').select('*').in('organization_id',[]).order('created_at',{ascending:false}),
     admin?db.from('cashflow_ledger').select('*').order('recorded_at',{ascending:false}):hasOrganization?db.from('cashflow_ledger').select('*').eq('organization_id',activeOrganizationId).order('recorded_at',{ascending:false}):db.from('cashflow_ledger').select('*').in('organization_id',[]).order('recorded_at',{ascending:false}),
     admin?db.from('conversations').select('*'):db.from('conversations').select('*'),
-    db.from('conversation_members').select('*'),
-    db.from('messages').select('*').order('created_at',{ascending:true}).limit(1000),
+    db.rpc('get_my_conversation_members'),
+    db.rpc('get_my_messages'),
     db.from('notifications').select('*').eq('recipient_user_id',userId).order('created_at',{ascending:false}).limit(100),
     db.from('channels').select('*'),
     db.from('channel_members').select('*')
@@ -95,13 +96,17 @@ export async function loadWorkspace(userId:string, requestedOrganizationId?:stri
     }
   }
   const profiles=Array.from(profileMap.values());
+  const activeTenancies=(tenRes.data||[]).filter((t:any)=>['active','move_out_requested'].includes(t.status));
+  const tenancyFor=(tenantId:string)=>activeTenancies.find((t:any)=>t.tenant_id===tenantId);
+  const unitFor=(unitId?:string)=>unitId?(unitsRes.data||[]).find((u:any)=>u.id===unitId):undefined;
+  const propertyFor=(propertyId?:string)=>propertyId?(propsRes.data||[]).find((p:any)=>p.id===propertyId):undefined;
 
   const role:BackendRole=admin?'admin':((memberships.find(m=>m.organization_id===activeOrganizationId)?.role||profileData.role) as BackendRole);
-  if(!role||!['admin','landlord','manager','tenant'].includes(role))throw new Error('Your NestTrack profile has no valid role.');
+  if(!role||!['admin','landlord','manager','tenant','technician'].includes(role))throw new Error('Your NestTrack profile has no valid role.');
 
   const orgs=(orgRes.data||[]).map((o:any)=>({
     id:o.id,name:o.name,ownerId:o.created_by||'',
-    inviteManager:'',inviteTenant:'',status:o.status,slug:o.slug,settings:o.settings
+    inviteManager:'',inviteTenant:'',status:o.status,slug:o.slug,settings:o.settings,paymentDetails:o.settings?.payment_details||{bankName:'',accountName:'',accountNumber:'',instructions:''}
   }));
   const activeOrg=orgs.find((o:any)=>o.id===activeOrganizationId)||{id:'platform',name:'NestTrack Platform',ownerId:'',inviteManager:'',inviteTenant:'',status:'active'};
 
@@ -109,18 +114,23 @@ export async function loadWorkspace(userId:string, requestedOrganizationId?:stri
     const ms=(membersRes.data||[]).filter((m:any)=>m.user_id===p.id);
     const m=ms.find((x:any)=>x.organization_id===activeOrganizationId)||ms[0];
     const welfare=(welfareRes.data||[]).find((w:any)=>w.tenant_id===p.id);
+    const tenancy=tenancyFor(p.id);
+    const tenancyUnit=unitFor(tenancy?.unit_id);
+    const tenancyProperty=propertyFor(tenancyUnit?.property_id);
     return {
       id:p.id,name:p.full_name,email:p.email,phone:p.phone||'',avatar_url:p.avatar_url||undefined,password:'',
       role:(p.id===userId?role:(m?.role||p.role)) as BackendRole,
-      orgId:m?.organization_id||'',welfare:welfare?.status||'Good',
+      orgId:m?.organization_id||'',propertyId:tenancyProperty?.id,unit:tenancyUnit?.label,welfare:welfare?.status||'Good',
       memberships:ms.map((x:any)=>({organizationId:x.organization_id,role:x.role,status:x.status,permissions:x.permissions||{}}))
     };
   });
   if(!users.some(u=>u.id===userId)){
-    users.push({id:userId,name:profileData.full_name,email:profileData.email,phone:profileData.phone||'',avatar_url:profileData.avatar_url||undefined,password:'',role,orgId:activeOrganizationId||'',welfare:'Good',memberships:memberships.map(m=>({organizationId:m.organization_id,role:m.role,status:m.status,permissions:m.permissions||{}}))});
+    const ownTenancy=tenancyFor(userId);
+    const ownUnit=unitFor(ownTenancy?.unit_id);
+    const ownProperty=propertyFor(ownUnit?.property_id);
+    users.push({id:userId,name:profileData.full_name,email:profileData.email,phone:profileData.phone||'',avatar_url:profileData.avatar_url||undefined,password:'',role,orgId:activeOrganizationId||'',propertyId:ownProperty?.id,unit:ownUnit?.label,welfare:'Good',memberships:memberships.map(m=>({organizationId:m.organization_id,role:m.role,status:m.status,permissions:m.permissions||{}}))});
   }
 
-  const activeTenancies=(tenRes.data||[]).filter((t:any)=>['active','move_out_requested'].includes(t.status));
   const properties=(propsRes.data||[]).map((p:any)=>({
     id:p.id,orgId:p.organization_id,name:p.name,address:p.address,
     image:p.image_url||'',
@@ -130,7 +140,7 @@ export async function loadWorkspace(userId:string, requestedOrganizationId?:stri
     })
   }));
   const payments=(payRes.data||[]).map((p:any)=>({id:p.id,tenantId:p.tenant_id,amount:Number(p.amount_due),due:p.due_date,status:p.status,method:p.method||''}));
-  const tickets=(ticketRes.data||[]).map((t:any)=>({id:t.id,tenantId:t.tenant_id,title:t.title,description:t.description||'',category:t.category||'',status:t.status,priority:t.priority,assignedTo:t.assigned_to,propertyId:t.property_id,unitId:t.unit_id,history:(historyRes.data||[]).filter((h:any)=>h.ticket_id===t.id)}));
+  const tickets=(ticketRes.data||[]).map((t:any)=>({id:t.id,tenantId:t.tenant_id,title:t.title,description:t.description||'',category:t.category||'',status:t.status,priority:t.priority,assignedTo:t.assigned_to,propertyId:t.property_id,unitId:t.unit_id,history:(historyRes.data||[]).filter((h:any)=>h.ticket_id===t.id),paymentHistory:(paymentEventsRes.data||[]).filter((h:any)=>h.ticket_id===t.id),estimatedCost:t.estimated_cost==null?null:Number(t.estimated_cost),billingStatus:t.billing_status||'Not billable',paymentReference:t.payment_reference||null,paidConfirmedAt:t.paid_confirmed_at||null,paidConfirmedBy:t.paid_confirmed_by||null,tenantPaymentReference:t.tenant_payment_reference||null,reviewNote:t.payment_review_note||null}));
   const cashflow=(cashRes.data||[]).map((c:any)=>({id:c.id,landlordId:c.landlord_id,orgId:c.organization_id,paymentId:c.payment_id||'',tenantId:c.tenant_id||'',amount:Number(c.amount),type:c.type,status:c.status,timestamp:c.recorded_at,method:c.method||''}));
   const channelRows=(channelsRes.data||[]) as any[];
   const channelMembers=(channelMembersRes.data||[]) as any[];
@@ -148,7 +158,7 @@ export async function loadWorkspace(userId:string, requestedOrganizationId?:stri
   const messages=visibleMessages.map((m:any)=>{
     const other=participantPairs[`${m.conversation_id}:${m.sender_id}`]||'';
     const channel=channelByConversation.get(m.conversation_id);
-    return {id:m.id,from:m.sender_id,to:other,text:m.body,time:new Date(m.created_at).toLocaleTimeString([], {hour:'numeric',minute:'2-digit'}),conversationId:m.conversation_id,channelId:channel?.id,readAt:m.read_at};
+    return {id:m.id,from:m.sender_id,to:other,text:m.body,time:new Date(m.created_at).toLocaleTimeString([], {hour:'numeric',minute:'2-digit'}),conversationId:m.conversation_id,channelId:channel?.id,readAt:m.read_at,editedAt:m.edited_at||null,deletedAt:m.deleted_at||null};
   });
   const tenancies=(tenRes.data||[]).map((t:any)=>({
     id:t.id,organizationId:t.organization_id,unitId:t.unit_id,tenantId:t.tenant_id,
@@ -156,17 +166,20 @@ export async function loadWorkspace(userId:string, requestedOrganizationId?:stri
     status:t.status,noticeDate:t.notice_date,requestedMoveOutDate:t.requested_move_out_date,
     reason:t.move_out_reason,tenantNote:t.tenant_note,managerNote:t.manager_note
   }));
-  const notifications=(notificationRes.data||[]).map((n:any)=>({id:n.id,title:n.title,body:n.body,eventType:n.event_type,readAt:n.read_at,createdAt:n.created_at,organizationId:n.organization_id}));
+  const notifications=(notificationRes.data||[]).map((n:any)=>({id:n.id,title:n.title,body:n.body,eventType:n.event_type,readAt:n.read_at,createdAt:n.created_at,organizationId:n.organization_id,relatedEntityType:n.related_entity_type||null,relatedEntityId:n.related_entity_id||null}));
 
+  const ownTenancy=tenancyFor(userId);
+  const ownUnit=unitFor(ownTenancy?.unit_id);
+  const ownProperty=propertyFor(ownUnit?.property_id);
   return {
-    current:{id:userId,name:profileData.full_name,email:profileData.email,password:'',role,orgId:activeOrganizationId||'',welfare:'Good',
+    current:{id:userId,name:profileData.full_name,email:profileData.email,password:'',role,orgId:activeOrganizationId||'',propertyId:ownProperty?.id,unit:ownUnit?.label,welfare:'Good',
       memberships:memberships.map(m=>({organizationId:m.organization_id,role:m.role,status:m.status,permissions:m.permissions||{}}))},
     memberships,users,orgs,props:properties,payments,cashflow,messages,tickets,notifications,tenancies,channels
   };
 }
 
 export async function signIn(email:string,password:string){const db=requireSupabase();const {data,error}=await db.auth.signInWithPassword({email,password});if(error)throw error;return data.user!;}
-export async function createIndependentProfile(fullName:string,role:'manager'|'tenant',phone?:string){const db=requireSupabase();const {data,error}=await db.rpc('create_independent_profile',{p_full_name:fullName,p_role:role,p_phone:phone||null});if(error)throw error;return data as string;}
+export async function createIndependentProfile(fullName:string,role:'manager'|'tenant'|'technician',phone?:string){const db=requireSupabase();const {data,error}=await db.rpc('create_independent_profile',{p_full_name:fullName,p_role:role,p_phone:phone||null});if(error)throw error;return data as string;}
 export async function signOut(){if(supabase)await supabase.auth.signOut();}
 
 export async function createOrganization(name:string,slug?:string){const db=requireSupabase();const {data,error}=await db.rpc('create_organization',{p_name:name,p_slug:slug||null});if(error)throw error;return data;}
@@ -214,18 +227,11 @@ export async function updateTicket(id:string,status:string,assignee?:string,comm
 }
 export async function sendDirectMessage(otherUserId:string,body:string,organizationId?:string){
   const db=requireSupabase();
-  let {data:cid,error:e}=await db.rpc('get_or_create_direct_conversation',{p_other:otherUserId,p_organization_id:organizationId||null});
-  // Older installations may still have only the original one-argument RPC.
-  // Use it as a compatibility fallback while the forward migrations are being applied.
-  if(e && /function .*get_or_create_direct_conversation|could not find the function/i.test(e.message||'')){
-    const legacy=await db.rpc('get_or_create_direct_conversation',{p_other:otherUserId});
-    cid=legacy.data;
-    e=legacy.error;
-  }
-  if(e)throw e;
-  const {data:{user}}=await db.auth.getUser();
-  if(!user)throw new Error('You must be signed in to send messages.');
-  const {error}=await db.from('messages').insert({conversation_id:cid,sender_id:user!.id,body});
+  const {error}=await db.rpc('send_direct_message',{
+    p_recipient_id:otherUserId,
+    p_body:body,
+    p_organization_id:organizationId||null
+  });
   if(error)throw error;
 }
 
@@ -239,7 +245,7 @@ export async function markConversationRead(conversationId:string){const db=requi
 export async function markNotificationRead(id:string){const db=requireSupabase();const {error}=await db.rpc('mark_notification_read',{p_notification_id:id});if(error)throw error;}
 export async function markAllNotificationsRead(){const db=requireSupabase();const {error}=await db.rpc('mark_all_notifications_read');if(error)throw error;}
 
-export async function createInvitation(organizationId:string,email:string|undefined,role:'manager'|'tenant',expiresAt?:string){
+export async function createInvitation(organizationId:string,email:string|undefined,role:'manager'|'tenant'|'technician',expiresAt?:string){
   const db=requireSupabase();const {data,error}=await db.rpc('create_organization_invitation',{p_organization_id:organizationId,p_email:email||null,p_role:role,p_expires_at:expiresAt||null,p_max_uses:1});
   if(error)throw error;return data as {id:string;token:string;organization_id:string;role:string;expires_at:string};
 }
@@ -261,6 +267,18 @@ export async function decideMoveOut(tenancyId:string,approve:boolean,note?:strin
 export async function createTicket(organizationId:string,propertyId:string,unitId:string,title:string,description:string,category?:string,priority='Medium'){
   const db=requireSupabase();const {data,error}=await db.rpc('create_ticket',{p_organization_id:organizationId,p_property_id:propertyId,p_unit_id:unitId,p_title:title,p_description:description,p_category:category||null,p_priority:priority});if(error)throw error;return data;
 }
+export async function updateMessage(id:string,body:string){const db=requireSupabase();const {error}=await db.rpc('edit_message',{p_message_id:id,p_body:body});if(error)throw error;}
+export async function deleteMessage(id:string){const db=requireSupabase();const {error}=await db.rpc('soft_delete_message',{p_message_id:id});if(error)throw error;}
+export async function loadMessageHistory(id:string){const db=requireSupabase();const {data,error}=await db.rpc('get_message_history',{p_message_id:id});if(error)throw error;return data||[];}
+export async function assignTicketTechnician(ticketId:string,technicianId:string|null){const db=requireSupabase();const {error}=await db.rpc('assign_ticket_technician',{p_ticket_id:ticketId,p_technician_id:technicianId});if(error)throw error;}
+export async function submitTicketQuote(ticketId:string,amount:number){const db=requireSupabase();const {error}=await db.rpc('submit_ticket_quote',{p_ticket_id:ticketId,p_amount:amount});if(error)throw error;}
+export async function approveTicketQuote(ticketId:string){const db=requireSupabase();const {error}=await db.rpc('approve_ticket_quote',{p_ticket_id:ticketId});if(error)throw error;}
+export async function confirmTicketPayment(ticketId:string){const db=requireSupabase();const {error}=await db.rpc('confirm_ticket_payment',{p_ticket_id:ticketId});if(error)throw error;}
+export async function submitTicketPaymentEvidence(ticketId:string,reference:string){const db=requireSupabase();const {error}=await db.rpc('submit_ticket_payment_evidence',{p_ticket_id:ticketId,p_payment_reference:reference});if(error)throw error;}
+export async function disputeTicketPayment(ticketId:string,note:string){const db=requireSupabase();const {error}=await db.rpc('dispute_ticket_payment',{p_ticket_id:ticketId,p_note:note});if(error)throw error;}
+export async function reviewTicketPayment(ticketId:string,approved:boolean,note:string){const db=requireSupabase();const {error}=await db.rpc('review_ticket_payment',{p_ticket_id:ticketId,p_approved:approved,p_note:note});if(error)throw error;}
+export async function savePaymentDetails(organizationId:string,details:{bankName:string;accountName:string;accountNumber:string;instructions:string}){const db=requireSupabase();const {error}=await db.rpc('save_org_payment_details',{p_organization_id:organizationId,p_payment_details:details});if(error)throw error;}
+
 
 export async function updateProfile(userId:string,full_name:string,phone:string,avatarFile?:File,removeAvatar=false){
   const db=requireSupabase();let avatar_url:string|undefined;

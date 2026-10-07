@@ -1,20 +1,8 @@
 # NestTrack Supabase deployment
 
-1. Create a Supabase project.
-2. Run `schema.sql`, then `rls.sql`, then `onboarding.sql` in the SQL editor. The canonical RLS script now defines the platform-admin helper before policies reference it.
-3. Apply the feature migrations in this order:
-   - `migrations/20261005_feature_expansion.sql`
-   - `migrations/20261005_platform_admin_messaging.sql`
-   - `migrations/20261006_fix_conversation_members_rls_recursion.sql`
-   - `migrations/20261006_clean_architecture.sql`
-   - `migrations/20261006_independent_signup_and_tenant_assignment.sql`
-   - `migrations/20261006_messaging_independent_accounts.sql`
-   - `migrations/20261006_messaging_end_to_end.sql`
-4. Copy Project URL and anon key into `.env` from `.env.example`.
-5. Create the first platform admin by running:
+Use the current [deployment guide](../docs/DEPLOYMENT.md) and [security/retention guide](../docs/SECURITY_AND_RETENTION.md).
 
-```sql
-insert into public.platform_admins(id) values ('AUTH_USER_UUID');
-```
-
-The app uses Supabase Auth and refreshes messages, conversation membership, channels, notifications, payments, maintenance tickets and welfare checks through Realtime database events. The final messaging migration adds `messages`, `conversation_members`, `channel_members`, `channels`, and `notifications` to the `supabase_realtime` publication. Also enable `payments`, `maintenance_tickets` and `welfare_checks` in that publication.
+- Fresh database: run [`merged_deployment.sql`](merged_deployment.sql) once.
+- Existing database: apply only unapplied scripts from [`migrations/`](migrations/) in the dependency order documented in the deployment guide.
+- Do not run the fresh-install consolidated script on an existing production database.
+- `LOGIN_DIAGNOSTIC.sql` is an ad-hoc diagnostic, not a migration.
