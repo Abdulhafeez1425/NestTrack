@@ -319,3 +319,9 @@ VITE_SUPABASE_ANON_KEY
 ```
 
 Never add a Supabase service-role/secret key to Vite environment variables or frontend source.
+
+## Messaging after independent signup
+
+Manager and tenant accounts can message before they belong to an organization. Direct conversations are participant-scoped and may have a NULL organization_id. Apply `supabase/migrations/20261006_messaging_independent_accounts.sql` after the other migrations.
+
+If a newly created account cannot see the Messages page, make sure the frontend is using the latest build: unprovisioned accounts are intentionally allowed to access Dashboard/Profile/Messages while organization-only features remain unavailable until membership is assigned.

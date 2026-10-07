@@ -123,7 +123,7 @@ export async function loadWorkspace(userId:string, requestedOrganizationId?:stri
   const activeTenancies=(tenRes.data||[]).filter((t:any)=>['active','move_out_requested'].includes(t.status));
   const properties=(propsRes.data||[]).map((p:any)=>({
     id:p.id,orgId:p.organization_id,name:p.name,address:p.address,
-    image:p.image_url||'https://images.unsplash.com/photo-1600585154340-be6161a56a0c?auto=format&fit=crop&w=1200&q=80',
+    image:p.image_url||'',
     units:(unitsRes.data||[]).filter((u:any)=>u.property_id===p.id).map((u:any)=>{
       const tenancy=activeTenancies.find((t:any)=>t.unit_id===u.id);
       return {id:u.id,name:u.label,description:u.description||'',tenantId:tenancy?.tenant_id||u.current_tenant_id||undefined,rent:Number(tenancy?.rent_amount||u.rent_amount||0),status:u.status};
@@ -166,6 +166,7 @@ export async function loadWorkspace(userId:string, requestedOrganizationId?:stri
 }
 
 export async function signIn(email:string,password:string){const db=requireSupabase();const {data,error}=await db.auth.signInWithPassword({email,password});if(error)throw error;return data.user!;}
+export async function createIndependentProfile(fullName:string,role:'manager'|'tenant',phone?:string){const db=requireSupabase();const {data,error}=await db.rpc('create_independent_profile',{p_full_name:fullName,p_role:role,p_phone:phone||null});if(error)throw error;return data as string;}
 export async function signOut(){if(supabase)await supabase.auth.signOut();}
 
 export async function createOrganization(name:string,slug?:string){const db=requireSupabase();const {data,error}=await db.rpc('create_organization',{p_name:name,p_slug:slug||null});if(error)throw error;return data;}
@@ -235,8 +236,8 @@ export async function addChannelMember(channelId:string,userId:string){const db=
 export async function removeChannelMember(channelId:string,userId:string){const db=requireSupabase();const {error}=await db.rpc('remove_channel_member',{p_channel_id:channelId,p_user_id:userId});if(error)throw error;}
 export async function sendChannelMessage(channelId:string,body:string){const db=requireSupabase();const {data:channel,error:channelError}=await db.from('channels').select('conversation_id').eq('id',channelId).single();if(channelError)throw channelError;const {data:{user}}=await db.auth.getUser();if(!user)throw new Error('You must be signed in to send messages.');const {error}=await db.from('messages').insert({conversation_id:channel.conversation_id,sender_id:user.id,body});if(error)throw error;}
 export async function markConversationRead(conversationId:string){const db=requireSupabase();const {error}=await db.rpc('mark_conversation_read',{p_conversation_id:conversationId});if(error)throw error;}
-export async function markNotificationRead(id:string){const db=requireSupabase();const {error}=await db.from('notifications').update({read_at:new Date().toISOString()}).eq('id',id).eq('recipient_user_id',(await db.auth.getUser()).data.user?.id);if(error)throw error;}
-export async function markAllNotificationsRead(){const db=requireSupabase();const uid=(await db.auth.getUser()).data.user?.id;if(!uid)return;const {error}=await db.from('notifications').update({read_at:new Date().toISOString()}).eq('recipient_user_id',uid).is('read_at',null);if(error)throw error;}
+export async function markNotificationRead(id:string){const db=requireSupabase();const {error}=await db.rpc('mark_notification_read',{p_notification_id:id});if(error)throw error;}
+export async function markAllNotificationsRead(){const db=requireSupabase();const {error}=await db.rpc('mark_all_notifications_read');if(error)throw error;}
 
 export async function createInvitation(organizationId:string,email:string|undefined,role:'manager'|'tenant',expiresAt?:string){
   const db=requireSupabase();const {data,error}=await db.rpc('create_organization_invitation',{p_organization_id:organizationId,p_email:email||null,p_role:role,p_expires_at:expiresAt||null,p_max_uses:1});
