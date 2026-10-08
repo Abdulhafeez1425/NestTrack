@@ -144,7 +144,7 @@ export async function loadWorkspace(userId:string, requestedOrganizationId?:stri
   const payments=(payRes.data||[]).map((p:any)=>({id:p.id,tenantId:p.tenant_id,tenancyId:p.tenancy_id,amount:Number(p.amount_due),amountPaid:Number(p.amount_paid||0),due:p.due_date,status:p.status,method:p.method||'',receiptPath:p.receipt_path||null}));
   const paymentSubmissions=await Promise.all((paymentSubmissionsRes.data||[]).map(async(s:any)=>{
     const {data,error}=await db.storage.from('rent-payment-proofs').createSignedUrl(s.receipt_path,3600);
-    return {id:s.id,organizationId:s.organization_id,tenantId:s.tenant_id,paymentIds:s.payment_ids||[],months:(s.payment_months||[]).map((month:string)=>String(month).slice(0,7)),amount:Number(s.amount),status:s.status,receiptPath:s.receipt_path,receiptUrl:error?null:data?.signedUrl||null,submittedAt:s.submitted_at,confirmedBy:s.confirmed_by||null,confirmedAt:s.confirmed_at||null};
+    return {id:s.id,organizationId:s.organization_id,tenantId:s.tenant_id,paymentIds:s.payment_ids||[],months:(s.payment_months||[]).map((month:string)=>String(month).slice(0,7)),amount:Number(s.amount),status:s.status,receiptPath:s.receipt_path,receiptUrl:error?null:data?.signedUrl||null,receiptUrlError:error?.message||null,submittedAt:s.submitted_at,confirmedBy:s.confirmed_by||null,confirmedAt:s.confirmed_at||null,rejectedBy:s.rejected_by||null,rejectedAt:s.rejected_at||null,rejectionNote:s.rejection_note||null};
   }));
   const tickets=(ticketRes.data||[]).map((t:any)=>({id:t.id,tenantId:t.tenant_id,title:t.title,description:t.description||'',category:t.category||'',status:t.status,priority:t.priority,assignedTo:t.assigned_to,propertyId:t.property_id,unitId:t.unit_id,history:(historyRes.data||[]).filter((h:any)=>h.ticket_id===t.id),paymentHistory:(paymentEventsRes.data||[]).filter((h:any)=>h.ticket_id===t.id),estimatedCost:t.estimated_cost==null?null:Number(t.estimated_cost),billingStatus:t.billing_status||'Not billable',paymentReference:t.payment_reference||null,paidConfirmedAt:t.paid_confirmed_at||null,paidConfirmedBy:t.paid_confirmed_by||null,tenantPaymentReference:t.tenant_payment_reference||null,reviewNote:t.payment_review_note||null}));
   const cashflow=(cashRes.data||[]).map((c:any)=>({id:c.id,landlordId:c.landlord_id,orgId:c.organization_id,paymentId:c.payment_id||'',tenantId:c.tenant_id||'',amount:Number(c.amount),type:c.type,status:c.status,timestamp:c.recorded_at,method:c.method||''}));
@@ -247,6 +247,19 @@ export async function confirmRentPaymentSubmission(id:string){
   const db=requireSupabase();
   const {error}=await db.rpc('confirm_rent_payment_submission',{p_submission_id:id});
   if(error)throw error;
+}
+export async function rejectRentPaymentSubmission(id:string,note:string){
+  const trimmed=note.trim();
+  if(!trimmed)throw new Error('Provide a reason before rejecting this submission.');
+  const db=requireSupabase();
+  const {error}=await db.rpc('reject_rent_payment_submission',{p_submission_id:id,p_note:trimmed});
+  if(error)throw error;
+}
+export async function ensureMyRentPaymentSchedule():Promise<number>{
+  const db=requireSupabase();
+  const {data,error}=await db.rpc('ensure_my_rent_payment_schedule');
+  if(error)throw error;
+  return Number(data||0);
 }
 export async function updateTicket(id:string,status:string,assignee?:string,comment?:string){
   const db=requireSupabase();const {error}=await db.rpc('update_ticket_workflow',{p_ticket_id:id,p_status:status,p_assignee:assignee||null,p_comment:comment||null});

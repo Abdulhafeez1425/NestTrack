@@ -37,8 +37,11 @@ Forward migrations, in order:
 9. `20261007_technicians_messaging_billing.sql`
 10. `20261008_evidence_history_retention.sql`
 11. `20261009_rent_payment_proofs.sql`
+12. `20261010_rent_payment_rejection.sql`
+13. `20261011_rent_payment_proof_visibility.sql`
+14. `20261012_generate_monthly_rent_rows.sql`
 
-For the rent-proof workflow, apply `20261009_rent_payment_proofs.sql` to an existing database before deploying the matching frontend. It creates the private receipt bucket, submission table, RLS policies, and upload/confirmation RPCs. Apply only once per database using your migration ledger; do not rerun the fresh-install SQL against an existing database.
+For the rent-proof workflow, apply the listed rent-proof and rent-schedule migrations in order, skipping migrations already recorded in your ledger. The visibility migration reasserts private receipt access for active landlords; `20261012_generate_monthly_rent_rows.sql` backfills existing monthly tenancies, creates rows for new/updated tenancies, and provides the authenticated refresh RPC used by the Payments page. Monthly rent is due on the tenancy start day (clamped to the last day of shorter months), with up to 12 months available for advance payment. Deploy the matching frontend after applying the missing migrations. Do not rerun the fresh-install SQL against an existing database.
 
 Base installation files are `supabase/schema.sql`, `supabase/rls.sql`, `supabase/profile_deletion.sql`, and `supabase/onboarding.sql`; the consolidated file contains these before the forward migrations. `LOGIN_DIAGNOSTIC.sql` is an ad-hoc diagnostic, not a deployment migration.
 
@@ -75,7 +78,10 @@ Test using separate Supabase accounts for landlord, manager, tenant, and technic
 
 - Verify a tenant cannot see another tenant’s tickets or submit evidence for another ticket.
 - Verify a tenant can select one or more unpaid rent months, upload an image, and sees the submission as Pending; the landlord sees the same private proof and can confirm it.
+- Verify the tenant sees the selected month count, month names, and combined amount before submitting.
+- Verify an active monthly tenancy has rent rows for past/current months and up to 12 months ahead; a newly assigned tenancy and a tenant opening Payments generate the schedule automatically.
 - Verify confirmation marks every selected rent row paid, records the confirming landlord and timestamp, and updates cashflow; a tenant cannot confirm or attach another tenant’s payment rows.
+- Verify a landlord can reject a pending proof only with a reason; the tenant sees the reason, the unpaid months reopen, and the tenant can upload corrected proof.
 - Verify a tenant cannot read another tenant’s receipt object, and an unconfirmed submission does not mark rent paid.
 - Verify only the assigned technician can confirm submitted evidence.
 - Verify payment confirmation at/above the configured threshold remains pending landlord/manager review.

@@ -2,7 +2,7 @@
 
 ## Payment evidence and review
 
-NestTrack does not process, hold, or settle payments. For rent, the tenant selects one or more unpaid months, makes the bank transfer outside NestTrack, and uploads an image of the receipt. The grouped submission is recorded as **Pending** until the landlord confirms it; confirmation marks its selected rent rows paid. Confirmation is an administrative record, not proof of bank settlement.
+NestTrack does not process, hold, or settle payments. For rent, the tenant selects one or more unpaid months, makes the bank transfer outside NestTrack, and uploads an image of the receipt. The grouped submission is recorded as **Pending** until the landlord confirms or rejects it. Confirmation marks its selected rent rows paid. Rejection requires a reason, preserves the submitted proof/history, reopens the unpaid rent rows, and shows the tenant why they should correct and resubmit. These decisions are administrative records, not proof of bank settlement.
 
 Rent proof images live in the private `rent-payment-proofs` storage bucket. Authenticated tenants can upload only into their own folder; the submitting tenant and active organization landlords/managers can view a signed image link. The submission RPC verifies the tenant owns every selected rent row, rejects duplicate pending submissions, and derives the total and months from the database rows. Use the existing bank records to reconcile transfers independently.
 

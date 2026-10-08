@@ -5,7 +5,7 @@ NestTrack is a responsive property-operations web app for landlords, managers, t
 ## Current capabilities
 
 - Role-aware landlord, manager, tenant, technician, and platform-admin views.
-- Organization/property/unit and tenancy management, rent records, landlord-managed payment instructions, and private tenant receipt-image uploads covering one or more selected months. Rent submissions stay Pending until the landlord confirms them.
+- Organization/property/unit and tenancy management, automatically generated monthly rent rows, landlord-managed payment instructions, and private tenant receipt-image uploads covering one or more selected months. Rent submissions stay Pending until the landlord confirms or rejects them; rejected submissions include a reason and the tenant can resubmit.
 - Maintenance tickets visible to the organization’s technicians, assignable/removable by operations users, with technician quotes and tenant payment evidence.
 - Tenant-submitted bank reference or receipt number, technician confirmation, a second landlord/manager review for disputed payments or quotes at/above the configured threshold, and an immutable ticket payment-event trail.
 - Direct and channel messaging. Senders can edit messages or soft-delete them; participants can inspect prior versions. Soft-deleted messages remain available for 365 days before an administrator may purge eligible records.

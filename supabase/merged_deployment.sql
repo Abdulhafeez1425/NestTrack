@@ -4388,3 +4388,313 @@ grant execute on function public.submit_rent_payment_evidence(uuid[],text) to au
 grant execute on function public.confirm_rent_payment_submission(uuid) to authenticated;
 
 commit;
+
+-- ============================================================================
+-- SOURCE: supabase/migrations/20261010_rent_payment_rejection.sql
+-- ============================================================================
+begin;
+
+alter table public.rent_payment_submissions
+  add column if not exists rejected_by uuid references auth.users(id),
+  add column if not exists rejected_at timestamptz,
+  add column if not exists rejection_note text;
+
+alter table public.rent_payment_submissions
+  drop constraint if exists rent_payment_submissions_status_check;
+alter table public.rent_payment_submissions
+  add constraint rent_payment_submissions_status_check
+  check (status in ('Pending','Confirmed','Rejected'));
+
+-- Replace the original two-state decision invariant while keeping existing
+-- Pending and Confirmed rows valid and making every rejection attributable.
+alter table public.rent_payment_submissions
+  drop constraint if exists rent_payment_submissions_check;
+alter table public.rent_payment_submissions
+  drop constraint if exists rent_payment_submissions_decision_state_check;
+alter table public.rent_payment_submissions
+  add constraint rent_payment_submissions_decision_state_check check (
+    (status='Pending'
+      and confirmed_by is null and confirmed_at is null
+      and rejected_by is null and rejected_at is null and rejection_note is null)
+    or
+    (status='Confirmed'
+      and confirmed_by is not null and confirmed_at is not null
+      and rejected_by is null and rejected_at is null and rejection_note is null)
+    or
+    (status='Rejected'
+      and confirmed_by is null and confirmed_at is null
+      and rejected_by is not null and rejected_at is not null
+      and nullif(trim(rejection_note),'') is not null)
+  );
+
+create or replace function public.reject_rent_payment_submission(
+  p_submission_id uuid,
+  p_note text
+)
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  uid uuid := auth.uid();
+  submission public.rent_payment_submissions%rowtype;
+  note_text text := nullif(trim(coalesce(p_note,'')),'');
+  changed integer;
+begin
+  if uid is null then raise exception 'Not authenticated'; end if;
+  if note_text is null then raise exception 'A rejection reason is required'; end if;
+  if length(note_text) > 1000 then raise exception 'Rejection reasons must be 1000 characters or fewer'; end if;
+
+  select * into submission
+    from public.rent_payment_submissions
+   where id = p_submission_id
+   for update;
+  if not found then raise exception 'Payment submission not found'; end if;
+  if not exists (
+    select 1 from public.organization_members om
+     where om.organization_id = submission.organization_id
+       and om.user_id = uid and om.role = 'landlord' and om.status = 'active'
+  ) then raise exception 'Only the active landlord can reject this payment'; end if;
+  if submission.status <> 'Pending' then raise exception 'Only pending submissions can be rejected'; end if;
+
+  update public.payments p
+     set status=case
+           when p.amount_paid > 0 then 'Partially paid'
+           when p.due_date < current_date then 'Overdue'
+           else 'Due soon'
+         end,
+         receipt_path=null,
+         updated_at=now()
+   where p.id = any(submission.payment_ids)
+     and p.organization_id = submission.organization_id
+     and p.tenant_id = submission.tenant_id
+     and p.status = 'Pending review'
+     and p.receipt_path = submission.receipt_path;
+  get diagnostics changed = row_count;
+  if changed <> cardinality(submission.payment_ids) then
+    raise exception 'Some rent rows no longer match this pending payment submission';
+  end if;
+
+  update public.rent_payment_submissions
+     set status='Rejected',rejected_by=uid,rejected_at=now(),rejection_note=note_text
+   where id=p_submission_id;
+end;
+$$;
+
+revoke all on function public.reject_rent_payment_submission(uuid,text) from public,anon;
+grant execute on function public.reject_rent_payment_submission(uuid,text) to authenticated;
+
+notify pgrst, 'reload schema';
+
+commit;
+
+-- ============================================================================
+-- SOURCE: supabase/migrations/20261011_rent_payment_proof_visibility.sql
+-- ============================================================================
+begin;
+
+-- The bucket remains private. These grants only make the rows eligible for
+-- authenticated access; the RLS policies below still restrict each row/object.
+grant select on public.rent_payment_submissions to authenticated;
+grant select on storage.objects to authenticated;
+
+-- Tenants see their own submission rows; active organization landlords and
+-- managers can review every submission in their organization.
+drop policy if exists "Tenant and operations view rent payment submissions"
+  on public.rent_payment_submissions;
+create policy "Tenant and operations view rent payment submissions"
+  on public.rent_payment_submissions for select to authenticated
+  using (
+    tenant_id = auth.uid()
+    or exists (
+      select 1 from public.organization_members om
+       where om.organization_id = rent_payment_submissions.organization_id
+         and om.user_id = auth.uid()
+         and om.status = 'active'
+         and om.role in ('landlord','manager')
+    )
+  );
+
+-- Stored paths are organization-id / tenant-id / file. A landlord can read
+-- only proofs belonging to an organization where they have active membership.
+drop policy if exists "Tenant and landlord view rent payment proof"
+  on storage.objects;
+create policy "Tenant and landlord view rent payment proof"
+  on storage.objects for select to authenticated
+  using (
+    bucket_id = 'rent-payment-proofs'
+    and (
+      (storage.foldername(name))[2] = auth.uid()::text
+      or exists (
+        select 1 from public.organization_members om
+         where om.organization_id::text = (storage.foldername(name))[1]
+           and om.user_id = auth.uid()
+           and om.role in ('landlord','manager')
+           and om.status = 'active'
+      )
+    )
+  );
+
+notify pgrst, 'reload schema';
+
+commit;
+
+-- ============================================================================
+-- SOURCE: supabase/migrations/20261012_generate_monthly_rent_rows.sql
+-- ============================================================================
+begin;
+
+-- Populate the payments table from each monthly tenancy. Rent is due on the
+-- same day-of-month as the tenancy start (clamped to month-end, e.g. the 31st
+-- becomes the 28th/29th in February). Rows are generated through a rolling
+-- 12-month horizon so tenants can select advance-payment months too.
+create or replace function public.generate_monthly_rent_rows(p_tenancy_id uuid)
+returns integer
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  tenancy public.tenancies%rowtype;
+  last_billable_date date;
+  horizon_date date := (current_date + interval '12 months')::date;
+  first_month date;
+  last_month date;
+  month_start date;
+  due_day integer;
+  due_on date;
+  inserted_count integer := 0;
+  inserted_this_month integer := 0;
+begin
+  select * into tenancy
+    from public.tenancies
+   where id = p_tenancy_id
+   for update;
+  if not found then return 0; end if;
+  if tenancy.frequency <> 'monthly'
+     or tenancy.status not in ('active','move_out_requested','ended') then
+    return 0;
+  end if;
+
+  last_billable_date := case
+    when tenancy.status='ended' then least(current_date,coalesce(tenancy.end_date,current_date))
+    when tenancy.status='move_out_requested' then least(horizon_date,coalesce(tenancy.requested_move_out_date,current_date))
+    else least(horizon_date,coalesce(tenancy.end_date,horizon_date))
+  end;
+  if last_billable_date < tenancy.start_date then return 0; end if;
+
+  first_month := date_trunc('month',tenancy.start_date)::date;
+  last_month := date_trunc('month',last_billable_date)::date;
+
+  for month_start in
+    select series_month::date
+      from generate_series(first_month::timestamp,last_month::timestamp,interval '1 month') as series_month
+  loop
+    due_day := least(
+      extract(day from tenancy.start_date)::integer,
+      extract(day from (month_start + interval '1 month - 1 day'))::integer
+    );
+    due_on := month_start + (due_day - 1);
+    if due_on < tenancy.start_date or due_on > last_billable_date then
+      continue;
+    end if;
+
+    insert into public.payments(
+      organization_id,tenancy_id,tenant_id,due_date,amount_due,amount_paid,status
+    )
+    select tenancy.organization_id,tenancy.id,tenancy.tenant_id,due_on,
+           tenancy.rent_amount,0,
+           case when due_on < current_date then 'Overdue' else 'Due soon' end
+     where not exists (
+       select 1 from public.payments existing
+        where existing.tenancy_id=tenancy.id
+          and existing.due_date >= month_start
+          and existing.due_date < (month_start + interval '1 month')::date
+     );
+    get diagnostics inserted_this_month = row_count;
+    inserted_count := inserted_count + inserted_this_month;
+  end loop;
+
+  -- Bring older unpaid rows up to date when this idempotent generator runs.
+  update public.payments
+     set status='Overdue',updated_at=now()
+   where tenancy_id=tenancy.id and status='Due soon' and due_date < current_date;
+
+  return inserted_count;
+end;
+$$;
+
+revoke all on function public.generate_monthly_rent_rows(uuid) from public,anon,authenticated;
+
+create or replace function public.sync_monthly_rent_rows_for_tenancy()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  perform public.generate_monthly_rent_rows(new.id);
+  return new;
+end;
+$$;
+
+revoke all on function public.sync_monthly_rent_rows_for_tenancy() from public,anon,authenticated;
+drop trigger if exists tenancies_generate_monthly_rent_rows on public.tenancies;
+create trigger tenancies_generate_monthly_rent_rows
+  after insert or update of start_date,end_date,requested_move_out_date,rent_amount,frequency,status
+  on public.tenancies
+  for each row execute function public.sync_monthly_rent_rows_for_tenancy();
+
+create or replace function public.ensure_my_rent_payment_schedule()
+returns integer
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  uid uuid := auth.uid();
+  tenancy_id uuid;
+  inserted_count integer := 0;
+begin
+  if uid is null then raise exception 'Not authenticated'; end if;
+  for tenancy_id in
+    select distinct t.id
+      from public.tenancies t
+      join public.organization_members om
+        on om.organization_id=t.organization_id
+       and om.status='active'
+     where t.status in ('active','move_out_requested','ended')
+       and t.frequency='monthly'
+       and (
+         (om.user_id=uid and om.role='tenant' and t.tenant_id=uid)
+         or (om.user_id=uid and om.role in ('landlord','manager'))
+       )
+  loop
+    inserted_count := inserted_count + public.generate_monthly_rent_rows(tenancy_id);
+  end loop;
+  return inserted_count;
+end;
+$$;
+
+revoke all on function public.ensure_my_rent_payment_schedule() from public,anon;
+grant execute on function public.ensure_my_rent_payment_schedule() to authenticated;
+
+-- Backfill previously assigned monthly tenancies so current tenants have
+-- selectable month rows immediately after this migration is applied.
+do $$
+declare tenancy_id uuid;
+begin
+  for tenancy_id in
+    select id from public.tenancies
+     where frequency='monthly' and status in ('active','move_out_requested','ended')
+     order by start_date
+  loop
+    perform public.generate_monthly_rent_rows(tenancy_id);
+  end loop;
+end;
+$$;
+
+notify pgrst, 'reload schema';
+
+commit;
