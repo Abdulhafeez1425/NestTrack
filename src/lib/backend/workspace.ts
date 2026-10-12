@@ -2,11 +2,13 @@ import { supabase, isSupabaseConfigured } from '../supabase';
 
 export type BackendRole = 'admin'|'landlord'|'manager'|'tenant'|'technician';
 export type Membership = {organization_id:string; user_id:string; role:'landlord'|'manager'|'tenant'|'technician'; status:string; permissions?:Record<string,boolean>};
+export type WorkspaceUser = {id:string;name:string;email:string;phone:string;occupation:string;avatar_url?:string;createdAt?:string;password:string;role:BackendRole;orgId:string;propertyId?:string;unit?:string;welfare:string;memberships:{organizationId:string;role:string;status:string;permissions:Record<string,boolean>}[]};
+export type WorkspaceOrganization = {id:string;name:string;ownerId:string;inviteManager:string;inviteTenant:string;status?:string;slug?:string;settings?:Record<string,unknown>;paymentDetails?:Record<string,unknown>};
 export type Workspace = {
-  current:any;
+  current:WorkspaceUser;
   memberships: Membership[];
-  users:any[];
-  orgs:any[];
+  users:WorkspaceUser[];
+  orgs:WorkspaceOrganization[];
   props:any[];
   payments:any[];
   cashflow:any[];
@@ -74,8 +76,19 @@ export async function loadWorkspace(userId:string, requestedOrganizationId?:stri
     db.from('channel_members').select('*')
   ]);
 
-  for(const r of [orgRes,membersRes,propsRes,unitsRes,tenRes,payRes,paymentSubmissionsRes,welfareRes,ticketRes,cashRes,convRes,convMembersRes,messageRes,notificationRes,channelsRes,channelMembersRes]){
-    if(r.error)throw r.error;
+  const requiredReads:{name:string;error:{message:string;code?:string}|null}[]=[
+    {name:'organizations',error:orgRes.error},{name:'organization members',error:membersRes.error},
+    {name:'properties',error:propsRes.error},{name:'units',error:unitsRes.error},{name:'tenancies',error:tenRes.error},
+    {name:'rent payments',error:payRes.error},{name:'rent payment submissions',error:paymentSubmissionsRes.error},
+    {name:'welfare checks',error:welfareRes.error},{name:'maintenance tickets',error:ticketRes.error},
+    {name:'ticket history',error:historyRes.error},{name:'ticket payment events',error:paymentEventsRes.error},
+    {name:'cashflow',error:cashRes.error},{name:'conversations',error:convRes.error},
+    {name:'conversation members',error:convMembersRes.error},{name:'messages',error:messageRes.error},
+    {name:'notifications',error:notificationRes.error},{name:'channels',error:channelsRes.error},
+    {name:'channel members',error:channelMembersRes.error}
+  ];
+  for(const result of requiredReads){
+    if(result.error)throw new Error(`Failed to load ${result.name}${result.error.code?` (${result.error.code})`:''}: ${result.error.message}`);
   }
 
   // The platform directory is intentionally separate from organization data.
@@ -91,8 +104,8 @@ export async function loadWorkspace(userId:string, requestedOrganizationId?:stri
       if(row.organization_id) existing.directoryOrganizations.push({id:row.organization_id,name:row.organization_name});
     } else {
       profileMap.set(row.user_id,{
-        id:row.user_id, full_name:row.full_name, email:row.email, phone:row.phone,
-        avatar_url:row.avatar_url, role:row.role,
+        id:row.user_id, full_name:row.full_name, email:row.email, phone:row.phone, occupation:row.occupation||'',
+        avatar_url:row.avatar_url, role:row.role, created_at:row.created_at||null,
         directoryOrganizations:row.organization_id?[{id:row.organization_id,name:row.organization_name}]:[]
       });
     }
@@ -120,8 +133,8 @@ export async function loadWorkspace(userId:string, requestedOrganizationId?:stri
     const tenancyUnit=unitFor(tenancy?.unit_id);
     const tenancyProperty=propertyFor(tenancyUnit?.property_id);
     return {
-      id:p.id,name:p.full_name,email:p.email,phone:p.phone||'',avatar_url:p.avatar_url||undefined,password:'',
-      role:(p.id===userId?role:(m?.role||p.role)) as BackendRole,
+      id:p.id,name:p.full_name,email:p.email,phone:p.phone||'',occupation:p.occupation||'',avatar_url:p.avatar_url||undefined,password:'',
+      role:(p.id===userId?role:(m?.role||p.role)) as BackendRole,createdAt:p.created_at||undefined,
       orgId:m?.organization_id||'',propertyId:tenancyProperty?.id,unit:tenancyUnit?.label,welfare:welfare?.status||'Good',
       memberships:ms.map((x:any)=>({organizationId:x.organization_id,role:x.role,status:x.status,permissions:x.permissions||{}}))
     };
@@ -130,7 +143,7 @@ export async function loadWorkspace(userId:string, requestedOrganizationId?:stri
     const ownTenancy=tenancyFor(userId);
     const ownUnit=unitFor(ownTenancy?.unit_id);
     const ownProperty=propertyFor(ownUnit?.property_id);
-    users.push({id:userId,name:profileData.full_name,email:profileData.email,phone:profileData.phone||'',avatar_url:profileData.avatar_url||undefined,password:'',role,orgId:activeOrganizationId||'',propertyId:ownProperty?.id,unit:ownUnit?.label,welfare:'Good',memberships:memberships.map(m=>({organizationId:m.organization_id,role:m.role,status:m.status,permissions:m.permissions||{}}))});
+    users.push({id:userId,name:profileData.full_name,email:profileData.email,phone:profileData.phone||'',occupation:profileData.occupation||'',avatar_url:profileData.avatar_url||undefined,createdAt:profileData.created_at||undefined,password:'',role,orgId:activeOrganizationId||'',propertyId:ownProperty?.id,unit:ownUnit?.label,welfare:'Good',memberships:memberships.map(m=>({organizationId:m.organization_id,role:m.role,status:m.status,permissions:m.permissions||{}}))});
   }
 
   const properties=(propsRes.data||[]).map((p:any)=>({
@@ -181,14 +194,14 @@ export async function loadWorkspace(userId:string, requestedOrganizationId?:stri
   const ownUnit=unitFor(ownTenancy?.unit_id);
   const ownProperty=propertyFor(ownUnit?.property_id);
   return {
-    current:{id:userId,name:profileData.full_name,email:profileData.email,password:'',role,orgId:activeOrganizationId||'',propertyId:ownProperty?.id,unit:ownUnit?.label,welfare:'Good',
+    current:{id:userId,name:profileData.full_name,email:profileData.email,phone:profileData.phone||'',occupation:profileData.occupation||'',password:'',role,orgId:activeOrganizationId||'',propertyId:ownProperty?.id,unit:ownUnit?.label,welfare:'Good',
       memberships:memberships.map(m=>({organizationId:m.organization_id,role:m.role,status:m.status,permissions:m.permissions||{}}))},
     memberships,users,orgs,props:properties,payments,paymentSubmissions,cashflow,messages,tickets,notifications,tenancies,channels
   };
 }
 
 export async function signIn(email:string,password:string){const db=requireSupabase();const {data,error}=await db.auth.signInWithPassword({email,password});if(error)throw error;return data.user!;}
-export async function createIndependentProfile(fullName:string,role:'manager'|'tenant'|'technician',phone?:string){const db=requireSupabase();const {data,error}=await db.rpc('create_independent_profile',{p_full_name:fullName,p_role:role,p_phone:phone||null});if(error)throw error;return data as string;}
+export async function createIndependentProfile(fullName:string,role:'manager'|'tenant'|'technician',phone?:string,occupation?:string){const db=requireSupabase();const {data,error}=await db.rpc('create_independent_profile',{p_full_name:fullName,p_role:role,p_phone:phone||null,p_occupation:occupation||null});if(error)throw error;return data as string;}
 export async function signOut(){if(supabase)await supabase.auth.signOut();}
 
 export async function createOrganization(name:string,slug?:string){const db=requireSupabase();const {data,error}=await db.rpc('create_organization',{p_name:name,p_slug:slug||null});if(error)throw error;return data;}
@@ -240,7 +253,7 @@ export async function uploadRentPaymentProof(paymentIds:string[],organizationId:
   const {error:uploadError}=await db.storage.from('rent-payment-proofs').upload(path,file,{contentType:file.type,upsert:false});
   if(uploadError)throw uploadError;
   const {data,error}=await db.rpc('submit_rent_payment_evidence',{p_payment_ids:paymentIds,p_receipt_path:path});
-  if(error)throw error;
+  if(error){await db.storage.from('rent-payment-proofs').remove([path]);throw error;}
   return data as string;
 }
 export async function confirmRentPaymentSubmission(id:string){
@@ -343,3 +356,9 @@ export async function deleteTenantAccount(id:string){const db=requireSupabase();
 export async function deleteLandlordAccount(id:string){const db=requireSupabase();const {error}=await db.rpc('admin_delete_landlord',{p_landlord_id:id});if(error)throw error;}
 
 export {isSupabaseConfigured};
+
+export async function adminDeleteUser(userId:string){
+  const db=requireSupabase();
+  const {error}=await db.rpc('admin_delete_user',{p_user_id:userId});
+  if(error)throw error;
+}

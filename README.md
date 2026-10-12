@@ -6,11 +6,12 @@ NestTrack is a responsive property-operations web app for landlords, managers, t
 
 - Role-aware landlord, manager, tenant, technician, and platform-admin views.
 - Organization/property/unit and tenancy management, automatically generated monthly rent rows, landlord-managed payment instructions, and private tenant receipt-image uploads covering one or more selected months. Rent submissions stay Pending until the landlord confirms or rejects them; rejected submissions include a reason and the tenant can resubmit.
-- Maintenance tickets visible to the organization’s technicians, assignable/removable by operations users, with technician quotes and tenant payment evidence.
+- Maintenance tickets visible to organization technicians and assignable/removable by landlords or authorized managers. Technicians enter an occupation/trade at signup and must accept an organization invitation before they appear in the assignment list.
 - Tenant-submitted bank reference or receipt number, technician confirmation, a second landlord/manager review for disputed payments or quotes at/above the configured threshold, and an immutable ticket payment-event trail.
 - Direct and channel messaging. Senders can edit messages or soft-delete them; participants can inspect prior versions. Soft-deleted messages remain available for 365 days before an administrator may purge eligible records.
 - Notifications include an action to open the affected section, such as Maintenance, Payments, Messages, Move-out requests, or Properties.
 - Profile-image support and responsive layouts for phones, tablets, and desktop.
+- Platform-admin user directory with responsive user-details drawer, organization overview, and guarded account removal.
 
 > **Payments are off-platform.** NestTrack does not move money or verify bank settlement. It records evidence references and review decisions; teams must reconcile transfers with their bank.
 
@@ -39,7 +40,7 @@ Production builds without Supabase are blocked from local-account mode. Never ex
 ## Database deployment
 
 - **Fresh database:** execute [`supabase/merged_deployment.sql`](supabase/merged_deployment.sql) once in the Supabase SQL editor.
-- **Existing database:** apply only migrations not already recorded/applied, in filename order. Do **not** rerun the consolidated script over production data.
+- **Existing database:** consult [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md), verify the migration ledger, and apply only unapplied migrations in the documented dependency order—not alphabetical/filename order. Back up and test on staging first. Do **not** rerun the consolidated script over production data.
 - Deployment details, test checklist, and migration list: [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md).
 - Payment review, message history, retention, and production security: [`docs/SECURITY_AND_RETENTION.md`](docs/SECURITY_AND_RETENTION.md).
 

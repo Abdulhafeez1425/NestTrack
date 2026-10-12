@@ -40,12 +40,24 @@ Forward migrations, in order:
 12. `20261010_rent_payment_rejection.sql`
 13. `20261011_rent_payment_proof_visibility.sql`
 14. `20261012_generate_monthly_rent_rows.sql`
+15. `20261013_technician_occupation.sql`
+16. `20261014_workspace_hardening.sql`
 
-For the rent-proof workflow, apply the listed rent-proof and rent-schedule migrations in order, skipping migrations already recorded in your ledger. The visibility migration reasserts private receipt access for active landlords; `20261012_generate_monthly_rent_rows.sql` backfills existing monthly tenancies, creates rows for new/updated tenancies, and provides the authenticated refresh RPC used by the Payments page. Monthly rent is due on the tenancy start day (clamped to the last day of shorter months), with up to 12 months available for advance payment. Deploy the matching frontend after applying the missing migrations. Do not rerun the fresh-install SQL against an existing database.
+For the rent-proof workflow, apply the listed rent-proof and rent-schedule migrations in order, skipping migrations already recorded in your ledger. The visibility migration reasserts private receipt access for active landlords; `20261012_generate_monthly_rent_rows.sql` backfills existing monthly tenancies, creates rows for new/updated tenancies, and provides the authenticated refresh RPC used by the Payments page. `20261013_technician_occupation.sql` adds technician occupation/trade to signup and the authenticated user directory used by ticket assignment. `20261014_workspace_hardening.sql` scopes directory results, serializes overlapping rent submissions, reconciles future unpaid rent after tenancy changes, and enables role-checked admin user removal. Monthly rent is due on the tenancy start day (clamped to the last day of shorter months), with up to 12 months available for advance payment. Deploy the matching frontend after applying the missing migrations. Do not rerun the fresh-install SQL against an existing database.
 
 Base installation files are `supabase/schema.sql`, `supabase/rls.sql`, `supabase/profile_deletion.sql`, and `supabase/onboarding.sql`; the consolidated file contains these before the forward migrations. `LOGIN_DIAGNOSTIC.sql` is an ad-hoc diagnostic, not a deployment migration.
 
 Use a migration ledger/checklist and backup before applying changes to an existing project. Test the entire ordered migration set against a staging database first. Review the SQL and database logs before promoting to production.
+
+### Additional acceptance tests
+
+- User directory: a user sees their own record and active colleagues from shared organizations; users outside those organizations are not returned; platform administrators retain dashboard visibility.
+- Rent concurrency: submit two requests concurrently for at least one same rent row; exactly one may remain pending and the other must receive a clear duplicate/pending error. Test rejection then resubmission too.
+- Schedule reconciliation: change a tenancy rent amount and end date; unpaid future rows should reflect the new amount/end boundary, while paid, partially-paid, and pending-review rows stay unchanged.
+- Admin user drawer: inspect profile image/fallback initials, organization, joined date and activity metrics; attempt to remove self/an admin (blocked), remove a user (allowed), and verify landlord deletion warning and cleanup in staging.
+- Query failures: force read failures for ticket history/payment events and verify a clear workspace error instead of incomplete cards.
+
+`npm run test:staging:auth` is an opt-in integration test that creates and removes disposable auth users. It refuses to run without explicit staging flags, a matching staging project reference, and a service-role key. Never run it against production.
 
 ## 3. Configure the application
 
@@ -66,7 +78,7 @@ Deploy the generated `dist/` directory to a static host and set the same variabl
 
 Create the first landlord through the application signup screen. Create the platform administrator only through Supabase Auth and insert its UUID into `public.platform_admins` using a controlled administrative session. Do not put administrator credentials in source, Markdown, migrations, or frontend variables.
 
-Landlords invite managers, tenants, and technicians with secure role-scoped links. A technician must join an organization before assignment.
+Landlords or authorized managers invite managers, tenants, and technicians with secure role-scoped links. Technicians enter an occupation/trade at signup and must accept the organization invitation before they appear in the assignment list. If the assignment list only shows Unassigned, verify the technician accepted the invite and has active technician membership in the same organization.
 
 ## 5. Storage and Realtime
 
@@ -83,6 +95,8 @@ Test using separate Supabase accounts for landlord, manager, tenant, and technic
 - Verify confirmation marks every selected rent row paid, records the confirming landlord and timestamp, and updates cashflow; a tenant cannot confirm or attach another tenant’s payment rows.
 - Verify a landlord can reject a pending proof only with a reason; the tenant sees the reason, the unpaid months reopen, and the tenant can upload corrected proof.
 - Verify a tenant cannot read another tenant’s receipt object, and an unconfirmed submission does not mark rent paid.
+- Sign up a technician with an occupation/trade; invite them to the organization and accept the link. Confirm their name and trade appear in the assignment dropdown, and assign then unassign a ticket.
+- Verify a technician who has not joined this organization and technicians from another organization are not offered for assignment, and the database RPC rejects attempts to assign them.
 - Verify only the assigned technician can confirm submitted evidence.
 - Verify payment confirmation at/above the configured threshold remains pending landlord/manager review.
 - Verify a tenant dispute routes to the review queue and approval/dispute decisions create audit events.

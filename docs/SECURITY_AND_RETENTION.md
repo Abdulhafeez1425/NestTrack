@@ -39,3 +39,7 @@ Production safeguards:
 - Test with role-separated accounts and a staging project before production.
 - Keep backups, restore procedures, logs, access reviews, and an incident-response contact current.
 - Avoid storing bank details in message bodies or logs; verify who can view landlord payment instructions for the deployed version.
+
+## Platform admin user details and deletion
+
+The platform admin dashboard shows profile details, role, organization memberships, joined date when present, and a current organization overview in a responsive side drawer. The user directory is limited to the signed-in user, active coworkers in shared organizations, or the explicitly authorized platform administrator. A platform admin may remove a non-admin account from the drawer; the database RPC enforces the admin check and prevents self-deletion or deletion of another platform admin. Removing a landlord also deletes the landlord-owned organization data, so the UI requires an explicit warning confirmation. Staging-test this cascade and verify affected users and tenant/payment records before production use.

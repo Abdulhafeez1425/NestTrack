@@ -11,3 +11,4 @@ Use the current [deployment guide](../docs/DEPLOYMENT.md) and [security/retentio
 - Landlord rejection with a required reason and tenant resubmission is added by `migrations/20261010_rent_payment_rejection.sql`; apply it after the rent-proof migration on existing databases.
 - Explicit authenticated read grants and reasserted tenant/landlord private proof policies are in `migrations/20261011_rent_payment_proof_visibility.sql`; apply it after the rejection migration on existing databases.
 - `migrations/20261012_generate_monthly_rent_rows.sql` backfills existing monthly tenancies and automatically creates monthly rent rows for new/changed tenancies, which populate the tenant month selector.
+- `migrations/20261013_technician_occupation.sql` adds technician occupation/trade, updates the directory query, and supports signup; technicians must accept an organization invite before they can be assigned.
