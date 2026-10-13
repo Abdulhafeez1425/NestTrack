@@ -3571,7 +3571,8 @@ revoke all on function public.get_my_conversation_members()
 grant execute on function public.get_my_conversation_members()
   to authenticated;
 
-create or replace function public.get_my_messages()
+drop function if exists public.get_my_messages();
+create function public.get_my_messages()
 returns table(
   id uuid,
   conversation_id uuid,
