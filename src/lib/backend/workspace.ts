@@ -24,12 +24,13 @@ const requireSupabase=()=>{if(!supabase)throw new Error('Supabase is not configu
 
 export async function loadWorkspace(userId:string, requestedOrganizationId?:string):Promise<Workspace>{
   const db=requireSupabase();
-  const [{data:profile,error:profileError},{data:admin,error:adminError},{data:authData,error:authError}] = await Promise.all([
+  const [{data:profile,error:profileError},{data:admin,error:adminError},{data:authData,error:authError},{data:directory,error:directoryError}] = await Promise.all([
     db.from('profiles').select('*').eq('id',userId).maybeSingle(),
     db.from('platform_admins').select('id').eq('id',userId).maybeSingle(),
-    db.auth.getUser()
+    db.auth.getUser(),
+    db.rpc('get_user_directory')
   ]);
-  if(profileError)throw profileError;if(adminError)throw adminError;if(authError)throw authError;
+  if(profileError)throw profileError;if(adminError)throw adminError;if(authError)throw authError;if(directoryError)throw new Error(`Failed to load user directory${directoryError.code?` (${directoryError.code})`:''}: ${directoryError.message}`);
   if(!profile&&!admin)throw new Error('Your authenticated account has no NestTrack profile. Complete onboarding or contact an administrator.');
 
   const profileData=profile||{
@@ -91,11 +92,8 @@ export async function loadWorkspace(userId:string, requestedOrganizationId?:stri
     if(result.error)throw new Error(`Failed to load ${result.name}${result.error.code?` (${result.error.code})`:''}: ${result.error.message}`);
   }
 
-  // The platform directory is intentionally separate from organization data.
-  // It lets authenticated users discover message recipients without granting
-  // them direct access to arbitrary organization records.
-  const {data:directory,error:directoryError}=await db.rpc('get_user_directory');
-  if(directoryError)throw directoryError;
+  // The platform directory is intentionally separate from organization data,
+  // but fetched with the initial auth/profile reads to avoid another waterfall.
   const directoryRows=(directory||[]) as any[];
   const profileMap=new Map<string,any>();
   for(const row of directoryRows){
@@ -155,16 +153,16 @@ export async function loadWorkspace(userId:string, requestedOrganizationId?:stri
     })
   }));
   const payments=(payRes.data||[]).map((p:any)=>({id:p.id,tenantId:p.tenant_id,tenancyId:p.tenancy_id,amount:Number(p.amount_due),amountPaid:Number(p.amount_paid||0),due:p.due_date,status:p.status,method:p.method||'',receiptPath:p.receipt_path||null}));
-  const paymentSubmissions=await Promise.all((paymentSubmissionsRes.data||[]).map(async(s:any)=>{
-    const {data,error}=await db.storage.from('rent-payment-proofs').createSignedUrl(s.receipt_path,3600);
-    return {id:s.id,organizationId:s.organization_id,tenantId:s.tenant_id,paymentIds:s.payment_ids||[],months:(s.payment_months||[]).map((month:string)=>String(month).slice(0,7)),amount:Number(s.amount),status:s.status,receiptPath:s.receipt_path,receiptUrl:error?null:data?.signedUrl||null,receiptUrlError:error?.message||null,submittedAt:s.submitted_at,confirmedBy:s.confirmed_by||null,confirmedAt:s.confirmed_at||null,rejectedBy:s.rejected_by||null,rejectedAt:s.rejected_at||null,rejectionNote:s.rejection_note||null};
-  }));
+  // Signed receipt URLs are issued only when the user opens a proof. This
+  // avoids an N-request storage signing waterfall during every workspace load.
+  const paymentSubmissions=(paymentSubmissionsRes.data||[]).map((s:any)=>({id:s.id,organizationId:s.organization_id,tenantId:s.tenant_id,paymentIds:s.payment_ids||[],months:(s.payment_months||[]).map((month:string)=>String(month).slice(0,7)),amount:Number(s.amount),status:s.status,receiptPath:s.receipt_path,receiptUrl:null,submittedAt:s.submitted_at,confirmedBy:s.confirmed_by||null,confirmedAt:s.confirmed_at||null,rejectedBy:s.rejected_by||null,rejectedAt:s.rejected_at||null,rejectionNote:s.rejection_note||null}));
   const tickets=(ticketRes.data||[]).map((t:any)=>({id:t.id,tenantId:t.tenant_id,title:t.title,description:t.description||'',category:t.category||'',status:t.status,priority:t.priority,assignedTo:t.assigned_to,propertyId:t.property_id,unitId:t.unit_id,history:(historyRes.data||[]).filter((h:any)=>h.ticket_id===t.id),paymentHistory:(paymentEventsRes.data||[]).filter((h:any)=>h.ticket_id===t.id),estimatedCost:t.estimated_cost==null?null:Number(t.estimated_cost),billingStatus:t.billing_status||'Not billable',paymentReference:t.payment_reference||null,paidConfirmedAt:t.paid_confirmed_at||null,paidConfirmedBy:t.paid_confirmed_by||null,tenantPaymentReference:t.tenant_payment_reference||null,reviewNote:t.payment_review_note||null}));
   const cashflow=(cashRes.data||[]).map((c:any)=>({id:c.id,landlordId:c.landlord_id,orgId:c.organization_id,paymentId:c.payment_id||'',tenantId:c.tenant_id||'',amount:Number(c.amount),type:c.type,status:c.status,timestamp:c.recorded_at,method:c.method||''}));
   const channelRows=(channelsRes.data||[]) as any[];
   const channelMembers=(channelMembersRes.data||[]) as any[];
   const channels=channelRows.map((c:any)=>({id:c.id,name:c.name,type:c.channel_type,visibility:c.visibility,organizationId:c.organization_id||null,propertyId:c.property_id||null,conversationId:c.conversation_id,members:channelMembers.filter((m:any)=>m.channel_id===c.id).map((m:any)=>m.user_id)}));
   const channelByConversation=new Map(channels.map((c:any)=>[c.conversationId,c]));
+  const conversationsById=new Map((convRes.data||[]).map((c:any)=>[c.id,c]));
   const convIds=new Set((convMembersRes.data||[]).filter((m:any)=>m.user_id===userId).map((m:any)=>m.conversation_id));
   const visibleMessages=(messageRes.data||[]).filter((m:any)=>convIds.has(m.conversation_id));
   const participantPairs=(convMembersRes.data||[]).reduce((map:any,m:any)=>{
@@ -180,7 +178,7 @@ export async function loadWorkspace(userId:string, requestedOrganizationId?:stri
   const messages=visibleMessages.map((m:any)=>{
     const other=participantPairs[`${m.conversation_id}:${m.sender_id}`]||'';
     const channel=channelByConversation.get(m.conversation_id);
-    return {id:m.id,from:m.sender_id,to:other,text:m.body,time:new Date(m.created_at).toLocaleTimeString([], {hour:'numeric',minute:'2-digit'}),conversationId:m.conversation_id,channelId:channel?.id,readAt:m.read_at,editedAt:m.edited_at||null,deletedAt:m.deleted_at||null};
+    return {id:m.id,from:m.sender_id,to:other,text:m.body,time:new Date(m.created_at).toLocaleTimeString([], {hour:'numeric',minute:'2-digit'}),conversationId:m.conversation_id,createdAt:m.created_at,channelId:channel?.id,readAt:m.read_at,editedAt:m.edited_at||null,deletedAt:m.deleted_at||null,isSupport:Boolean((conversationsById.get(m.conversation_id) as any)?.is_support)};
   });
   const tenancies=(tenRes.data||[]).map((t:any)=>({
     id:t.id,organizationId:t.organization_id,unitId:t.unit_id,tenantId:t.tenant_id,
@@ -238,9 +236,11 @@ export async function updateUnit(id:string,name:string,description:string,rent:n
   const {error}=await db.rpc('update_unit_as_landlord',{p_unit_id:id,p_label:name,p_description:description,p_rent_amount:rent});
   if(error)throw error;
 }
-export async function uploadRentPaymentProof(paymentIds:string[],organizationId:string,file:File){
+export async function uploadRentPaymentProof(paymentIds:string[],organizationId:string,file:File,amount:number,paymentDate:string){
   const db=requireSupabase();
-  if(!paymentIds.length)throw new Error('Select at least one month to submit.');
+  if(paymentIds.length!==1)throw new Error('Select exactly one rent month to submit.');
+  if(!Number.isFinite(amount)||amount<=0)throw new Error('Enter a payment amount greater than zero.');
+  if(!paymentDate)throw new Error('Enter the payment date.');
   if(!organizationId)throw new Error('Your active organization is missing.');
   const extensions:Record<string,string>={'image/jpeg':'jpg','image/png':'png','image/webp':'webp','image/gif':'gif'};
   const extension=extensions[file.type];
@@ -252,9 +252,16 @@ export async function uploadRentPaymentProof(paymentIds:string[],organizationId:
   const path=`${organizationId}/${user.id}/${crypto.randomUUID()}.${extension}`;
   const {error:uploadError}=await db.storage.from('rent-payment-proofs').upload(path,file,{contentType:file.type,upsert:false});
   if(uploadError)throw uploadError;
-  const {data,error}=await db.rpc('submit_rent_payment_evidence',{p_payment_ids:paymentIds,p_receipt_path:path});
+  const {data,error}=await db.rpc('submit_rent_payment_evidence',{p_payment_ids:paymentIds,p_receipt_path:path,p_amount:amount,p_payment_date:paymentDate});
   if(error){await db.storage.from('rent-payment-proofs').remove([path]);throw error;}
   return data as string;
+}
+export async function getRentPaymentProofUrl(path:string):Promise<string>{
+  const db=requireSupabase();
+  const {data,error}=await db.storage.from('rent-payment-proofs').createSignedUrl(path,3600);
+  if(error)throw error;
+  if(!data?.signedUrl)throw new Error('Could not create a secure receipt link.');
+  return data.signedUrl;
 }
 export async function confirmRentPaymentSubmission(id:string){
   const db=requireSupabase();
@@ -286,6 +293,19 @@ export async function sendDirectMessage(otherUserId:string,body:string,organizat
     p_organization_id:organizationId||null
   });
   if(error)throw error;
+}
+
+export async function getOrCreateSupportConversation():Promise<{conversationId:string;adminId:string}>{
+  const db=requireSupabase();
+  const {data,error}=await db.rpc('get_or_create_support_conversation');
+  if(error)throw error;
+  const row=Array.isArray(data)?data[0]:data;
+  if(!row?.conversation_id||!row?.support_admin_id)throw new Error('NestTrack Support did not return a valid conversation.');
+  return {conversationId:String(row.conversation_id),adminId:String(row.support_admin_id)};
+}
+export async function replyToSupportConversation(conversationId:string,body:string){
+  const trimmed=body.trim();if(!trimmed)throw new Error('Message cannot be empty.');
+  const db=requireSupabase();const {error}=await db.rpc('reply_to_support_conversation',{p_conversation_id:conversationId,p_body:trimmed});if(error)throw error;
 }
 
 export async function createChannel(input:{name:string;type:'property'|'organization'|'shared'|'platform';visibility:'private'|'organization'|'cross_organization'|'platform';organizationId?:string|null;propertyId?:string|null;memberIds?:string[]}){

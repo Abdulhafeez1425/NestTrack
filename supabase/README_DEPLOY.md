@@ -12,3 +12,5 @@ Use the current [deployment guide](../docs/DEPLOYMENT.md) and [security/retentio
 - Explicit authenticated read grants and reasserted tenant/landlord private proof policies are in `migrations/20261011_rent_payment_proof_visibility.sql`; apply it after the rejection migration on existing databases.
 - `migrations/20261012_generate_monthly_rent_rows.sql` backfills existing monthly tenancies and automatically creates monthly rent rows for new/changed tenancies, which populate the tenant month selector.
 - `migrations/20261013_technician_occupation.sql` adds technician occupation/trade, updates the directory query, and supports signup; technicians must accept an organization invite before they can be assigned.
+
+- `migrations/20261015_admin_support_inbox.sql` links Contact Support to a private, audited conversation visible to platform administrators; apply it after workspace hardening and before deploying the support-enabled frontend.

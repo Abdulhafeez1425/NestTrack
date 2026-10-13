@@ -1,6 +1,5 @@
-@import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Manrope:wght@400;500;600;700;800&display=swap');
 @import 'tailwindcss';
-:root{font-family:Manrope,system-ui,sans-serif;color:#102a2a;background:#f5faf9;font-synthesis:none;text-rendering:optimizeLegibility}*{box-sizing:border-box}body{margin:0;min-width:320px;background:#f5faf9}button,input,select,textarea{font:inherit}button{cursor:pointer}.card{background:#fff;border:1px solid #dce9e6;border-radius:18px;box-shadow:0 4px 18px rgba(16,42,42,.04)}.muted{color:#6b7d7a}.eyebrow{font:700 11px 'DM Sans';letter-spacing:.09em;text-transform:uppercase;color:#0f766e}.btn{border-radius:11px;padding:10px 14px;font:700 13px 'DM Sans';transition:.15s}.btn-primary{background:#0f766e;color:#fff}.btn-primary:hover{background:#0b625c}.btn-soft{background:#edf8f6;color:#0f766e}.btn-ghost{background:#fff;border:1px solid #dce9e6;color:#405552}.input{width:100%;border:1px solid #dce9e6;border-radius:11px;padding:10px 12px;outline:none;background:#fff}.input:focus{border-color:#0f766e;box-shadow:0 0 0 3px #0f766e18}.pill{display:inline-flex;align-items:center;border-radius:999px;padding:4px 9px;font:700 11px 'DM Sans'}.scrollbar::-webkit-scrollbar{width:6px}.scrollbar::-webkit-scrollbar-thumb{background:#cbdedb;border-radius:8px}
+:root{font-family:Manrope,system-ui,sans-serif;color:#102a2a;background:#f5f9f8;font-synthesis:none;text-rendering:optimizeLegibility}*{box-sizing:border-box}body{margin:0;min-width:320px;background:#f5f9f8}button,input,select,textarea{font:inherit}button{cursor:pointer}.card{background:#fff;border:1px solid #e2ebe8;border-radius:15px;box-shadow:0 3px 14px rgba(16,42,42,.035)}.muted{color:#6b7d7a}.eyebrow{font:700 11px 'DM Sans',system-ui,sans-serif;letter-spacing:.09em;text-transform:uppercase;color:#0f766e}.btn{border-radius:11px;padding:10px 14px;font:700 13px 'DM Sans',system-ui,sans-serif;transition:.15s}.btn-primary{background:#0f766e;color:#fff}.btn-primary:hover{background:#0b625c}.btn-soft{background:#edf8f6;color:#0f766e}.btn-ghost{background:#fff;border:1px solid #dce9e6;color:#405552}.input{width:100%;border:1px solid #dce9e6;border-radius:11px;padding:10px 12px;outline:none;background:#fff}.input:focus{border-color:#0f766e;box-shadow:0 0 0 3px #0f766e18}.pill{display:inline-flex;align-items:center;border-radius:999px;padding:4px 9px;font:700 11px 'DM Sans',system-ui,sans-serif}.scrollbar::-webkit-scrollbar{width:6px}.scrollbar::-webkit-scrollbar-thumb{background:#cbdedb;border-radius:8px}
 
 @media (min-width:1024px){
   .auth-layout{height:100vh;height:100dvh;min-height:0;overflow:hidden}
@@ -21,3 +20,41 @@ main{min-width:0;max-width:100%;} .card{min-width:0;} img{max-width:100%;}
   h1{font-size:clamp(1.5rem,7vw,1.9rem)!important;line-height:1.12;}
   .btn{padding:9px 11px;}
 }
+
+/* Quiet motion language: short page transitions and small tactile feedback. */
+button,.input{transition:background-color .18s ease,border-color .18s ease,box-shadow .18s ease,color .18s ease,transform .18s ease;}
+.btn:hover:not(:disabled){transform:translateY(-1px);box-shadow:0 5px 14px rgba(16,42,42,.1)}
+button:active:not(:disabled){transform:scale(.985)}
+.workspace-page-enter{animation:workspace-page-enter .28s cubic-bezier(.2,.7,.25,1) both}
+.nesttrack-loading-screen{min-height:100vh;min-height:100dvh;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:24px;background:radial-gradient(ellipse at 50% 44%,#e4f5f0 0%,#f5faf9 58%,#f5faf9 100%);color:#102a2a}
+.nesttrack-feature-loader{min-height:148px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:5px;padding:18px}
+.nesttrack-loader-mark{position:relative;width:68px;height:68px;display:grid;place-items:center;margin-bottom:10px}
+.nesttrack-loader-mark img{position:relative;z-index:1;width:48px;height:48px;padding:5px;border-radius:15px;background:#d9f6ef;object-fit:contain;animation:loader-mark-breathe 2s ease-in-out infinite}
+.nesttrack-loader-orbit{position:absolute;inset:0;border:2px solid #c8e8df;border-top-color:#0f766e;border-right-color:#0f766e;border-radius:50%;animation:loader-orbit 1.5s linear infinite}
+.nesttrack-loader-wordmark{font-size:20px;font-weight:800;letter-spacing:-.04em;color:#0b5f58}
+.nesttrack-loader-caption{margin-top:3px;color:#6b7d7a;font:500 12px 'DM Sans',sans-serif}
+.nesttrack-loader-bars{display:flex;align-items:center;gap:5px;margin-top:13px;height:8px}
+.nesttrack-loader-bars span{width:5px;height:5px;border-radius:50%;background:#0f766e;animation:loader-dot 1.15s ease-in-out infinite}
+.nesttrack-loader-bars span:nth-child(2){animation-delay:.14s}.nesttrack-loader-bars span:nth-child(3){animation-delay:.28s}
+@keyframes loader-orbit{to{transform:rotate(360deg)}}
+@keyframes loader-mark-breathe{0%,100%{transform:scale(.96);box-shadow:0 0 0 0 rgba(15,118,110,.08)}50%{transform:scale(1);box-shadow:0 0 0 7px rgba(15,118,110,.06)}}
+@keyframes loader-dot{0%,60%,100%{opacity:.35;transform:translateY(0)}30%{opacity:1;transform:translateY(-4px)}}
+@keyframes workspace-page-enter{from{opacity:0;transform:translateY(7px)}to{opacity:1;transform:translateY(0)}}
+@media(prefers-reduced-motion:reduce){*,*::before,*::after{scroll-behavior:auto!important;animation-duration:.01ms!important;animation-iteration-count:1!important;transition-duration:.01ms!important}}
+
+.app-toast{animation:toast-enter .22s cubic-bezier(.2,.7,.25,1) both}
+.admin-drawer-backdrop{animation:backdrop-enter .18s ease-out both}.admin-drawer-panel{animation:drawer-enter .24s cubic-bezier(.2,.7,.25,1) both}
+@keyframes toast-enter{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
+@keyframes backdrop-enter{from{opacity:0}to{opacity:1}}
+@keyframes drawer-enter{from{opacity:.85;transform:translateX(18px)}to{opacity:1;transform:translateX(0)}}
+
+/* Shared workspace styling inspired by the NestTrack dashboard reference. */
+.workspace-page-enter .card{box-shadow:0 3px 14px rgba(19,58,52,.035)}
+.workspace-page-enter table{border-collapse:separate;border-spacing:0;width:100%}
+.workspace-page-enter thead{background:#f7faf9;color:#748781}
+.workspace-page-enter th{font-size:10px;font-weight:800;letter-spacing:.055em;text-transform:uppercase}
+.workspace-page-enter tbody tr{transition:background-color .15s ease}
+.workspace-page-enter tbody tr:hover{background:#f7fbfa}
+.workspace-page-enter td,.workspace-page-enter th{border-bottom:1px solid #edf2f0}
+.workspace-page-enter tbody tr:last-child td{border-bottom:0}
+@media(max-width:767px){.workspace-page-enter th,.workspace-page-enter td{padding-left:10px;padding-right:10px}}

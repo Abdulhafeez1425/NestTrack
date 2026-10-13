@@ -28,6 +28,12 @@ Retention behavior:
 
 Editing history includes previous message text and may contain personal information. Restrict administrator access and document any applicable tenant privacy, retention, or legal-hold policy before launch.
 
+## Contact Support and administrator inbox
+
+Contact Support creates or reopens one private conversation for the signed-in requester. The conversation is marked separately from ordinary direct messages; only the requester and platform-admin team are participants. Current administrators are added when the thread is opened, and a database trigger adds subsequently appointed administrators to existing support threads. A dedicated RPC validates the requester/admin role before storing replies. Support messages continue to use the regular conversation message history, edit, soft-delete and retention controls; do not place passwords, bank details, or other secrets in support chat.
+
+Platform administrators see these threads in the Support inbox section of Messages. Normal users do not gain access to other users’ support conversations or the admin directory; the application uses the existing workspace directory boundaries and conversation RLS.
+
 ## Local accounts and production
 
 There are no seeded demo users or demo passwords in the application. Local development without Supabase requires a freshly created local account and is not a multi-user persistence service. A production build without Supabase configuration presents a blocking configuration screen instead of enabling local account mode.

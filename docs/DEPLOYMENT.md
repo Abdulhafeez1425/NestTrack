@@ -42,8 +42,9 @@ Forward migrations, in order:
 14. `20261012_generate_monthly_rent_rows.sql`
 15. `20261013_technician_occupation.sql`
 16. `20261014_workspace_hardening.sql`
+17. `20261015_admin_support_inbox.sql`
 
-For the rent-proof workflow, apply the listed rent-proof and rent-schedule migrations in order, skipping migrations already recorded in your ledger. The visibility migration reasserts private receipt access for active landlords; `20261012_generate_monthly_rent_rows.sql` backfills existing monthly tenancies, creates rows for new/updated tenancies, and provides the authenticated refresh RPC used by the Payments page. `20261013_technician_occupation.sql` adds technician occupation/trade to signup and the authenticated user directory used by ticket assignment. `20261014_workspace_hardening.sql` scopes directory results, serializes overlapping rent submissions, reconciles future unpaid rent after tenancy changes, and enables role-checked admin user removal. Monthly rent is due on the tenancy start day (clamped to the last day of shorter months), with up to 12 months available for advance payment. Deploy the matching frontend after applying the missing migrations. Do not rerun the fresh-install SQL against an existing database.
+For the rent-proof workflow, apply the listed rent-proof and rent-schedule migrations in order, skipping migrations already recorded in your ledger. The visibility migration reasserts private receipt access for active landlords; `20261012_generate_monthly_rent_rows.sql` backfills existing monthly tenancies, creates rows for new/updated tenancies, and provides the authenticated refresh RPC used by the Payments page. `20261013_technician_occupation.sql` adds technician occupation/trade to signup and the authenticated user directory used by ticket assignment. `20261014_workspace_hardening.sql` scopes directory results, serializes overlapping rent submissions, reconciles future unpaid rent after tenancy changes, and enables role-checked admin user removal. Monthly rent is due on the tenancy start day (clamped to the last day of shorter months), with up to 12 months available for advance payment. `20261015_admin_support_inbox.sql` adds a private support conversation per requester, includes current and future platform admins as participants, and allows only the requester/admin team to reply. Deploy the matching frontend after applying the missing migrations. Do not rerun the fresh-install SQL against an existing database.
 
 Base installation files are `supabase/schema.sql`, `supabase/rls.sql`, `supabase/profile_deletion.sql`, and `supabase/onboarding.sql`; the consolidated file contains these before the forward migrations. `LOGIN_DIAGNOSTIC.sql` is an ad-hoc diagnostic, not a deployment migration.
 
@@ -102,6 +103,8 @@ Test using separate Supabase accounts for landlord, manager, tenant, and technic
 - Verify a tenant dispute routes to the review queue and approval/dispute decisions create audit events.
 - Verify resolving a dispute before technician confirmation returns the ticket to technician review rather than marking it paid.
 - Verify message edits/deletes require the sender, recipients see the deletion marker, and prior text is available only to conversation participants.
+- Verify Contact Support creates/reopens the requester’s private thread, the requester can send and view replies, and the platform-admin Messages page lists incoming support threads with unread state.
+- Verify any platform admin can reply in the Support inbox, later-added admins receive existing support threads, and non-requesters/non-admins cannot view or reply to a support conversation.
 - Verify tenant/invitation/ticket/payment/message notifications navigate to their relevant section.
 - Verify organization isolation, profile-image access, password recovery, and account deletion.
 - Confirm production has no local demo users, credentials, or seed records.

@@ -27,6 +27,8 @@ const migrations = [
   '20261012_generate_monthly_rent_rows.sql',
   '20261013_technician_occupation.sql',
   '20261014_workspace_hardening.sql',
+  '20261015_admin_support_inbox.sql',
+  '20261016_rent_payment_logic.sql',
 ];
 const migrationFiles = (await readdir(resolve(root, 'supabase/migrations')))
   .filter((name) => name.endsWith('.sql') && name !== 'LOGIN_DIAGNOSTIC.sql');
