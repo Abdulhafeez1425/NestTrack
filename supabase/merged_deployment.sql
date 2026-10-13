@@ -3187,7 +3187,9 @@ begin
       (cid, p_other)
     on conflict (conversation_id, user_id) do nothing;
 
-  elsif common_org is not null then
+  end if;
+
+  if cid is not null and common_org is not null then
     update public.conversations
        set organization_id = coalesce(organization_id, common_org)
      where id = cid;
@@ -3348,6 +3350,7 @@ begin
     into sender_name
     from public.profiles p
    where p.id = new.sender_id;
+  sender_name := coalesce(sender_name, 'A NestTrack user');
 
   notification_title :=
     case
@@ -5140,7 +5143,7 @@ begin
   select cid, uid
   union
   select cid, pa.id from public.platform_admins pa
-  on conflict (conversation_id,user_id) do nothing;
+  on conflict on constraint conversation_members_pkey do nothing;
 
   return query select cid, first_admin;
 end;
@@ -5377,5 +5380,195 @@ revoke all on function public.confirm_rent_payment_submission(uuid) from public,
 grant execute on function public.confirm_rent_payment_submission(uuid) to authenticated;
 revoke all on function public.reject_rent_payment_submission(uuid,text) from public,anon;
 grant execute on function public.reject_rent_payment_submission(uuid,text) to authenticated;
+notify pgrst,'reload schema';
+commit;
+
+-- ============================================================================
+-- SOURCE: supabase/migrations/20261017_fix_support_conversation_ambiguity.sql
+-- ============================================================================
+begin;
+
+-- The original support function returns a column named conversation_id. In
+-- PL/pgSQL that output variable collides with ON CONFLICT (conversation_id,
+-- user_id). Use the primary-key constraint name so existing deployments can
+-- safely replace the function without recreating support conversations.
+create or replace function public.get_or_create_support_conversation()
+returns table(conversation_id uuid, support_admin_id uuid)
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  uid uuid := auth.uid();
+  cid uuid;
+  first_admin uuid;
+begin
+  if uid is null then raise exception 'Not authenticated'; end if;
+  if public.is_platform_admin() then
+    raise exception 'Platform administrators should use the Support inbox.';
+  end if;
+
+  select pa.id into first_admin
+    from public.platform_admins pa
+   order by pa.id
+   limit 1;
+  if first_admin is null then
+    raise exception 'NestTrack Support is not available yet. Please try again later.';
+  end if;
+
+  perform 1 from auth.users where id = uid for update;
+
+  select c.id into cid
+    from public.conversations c
+   where c.is_support and c.support_requester_id = uid
+   limit 1;
+
+  if cid is null then
+    insert into public.conversations(organization_id,is_support,support_requester_id)
+    values (null,true,uid)
+    returning id into cid;
+  end if;
+
+  insert into public.conversation_members(conversation_id,user_id)
+  select cid, uid
+  union
+  select cid, pa.id from public.platform_admins pa
+  on conflict on constraint conversation_members_pkey do nothing;
+
+  return query select cid, first_admin;
+end;
+$$;
+
+revoke all on function public.get_or_create_support_conversation() from public, anon;
+grant execute on function public.get_or_create_support_conversation() to authenticated;
+
+notify pgrst, 'reload schema';
+commit;
+
+-- ============================================================================
+-- SOURCE: supabase/migrations/20261018_fix_direct_conversation_branch.sql
+-- ============================================================================
+begin;
+
+-- Replace the direct-conversation function with equivalent guarded IF blocks.
+-- This avoids parser issues around the previous ELSIF branch and preserves
+-- organization association for an existing conversation.
+create or replace function public.get_or_create_direct_conversation(
+  p_other uuid,
+  p_organization_id uuid default null
+)
+returns uuid
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  uid uuid := auth.uid();
+  cid uuid;
+  common_org uuid;
+  pair_key text;
+begin
+  if uid is null then raise exception 'Not authenticated'; end if;
+  if p_other is null or p_other = uid then raise exception 'Invalid message recipient'; end if;
+  if not exists (select 1 from auth.users where id=p_other) then raise exception 'Recipient account does not exist'; end if;
+  if not exists (select 1 from public.profiles where id=p_other) then raise exception 'Recipient is not a NestTrack user'; end if;
+
+  pair_key := least(uid::text,p_other::text)||':'||greatest(uid::text,p_other::text);
+  perform pg_advisory_xact_lock(hashtextextended(pair_key,0));
+
+  if p_organization_id is not null
+     and exists (select 1 from public.organization_members where organization_id=p_organization_id and user_id=uid and status='active')
+     and exists (select 1 from public.organization_members where organization_id=p_organization_id and user_id=p_other and status='active') then
+    common_org := p_organization_id;
+  else
+    select om1.organization_id into common_org
+      from public.organization_members om1
+      join public.organization_members om2 on om2.organization_id=om1.organization_id and om2.user_id=p_other and om2.status='active'
+     where om1.user_id=uid and om1.status='active'
+     order by om1.organization_id limit 1;
+  end if;
+
+  select c.id into cid
+    from public.conversations c
+   where not exists (select 1 from public.channels ch where ch.conversation_id=c.id)
+     and exists (select 1 from public.conversation_members cm where cm.conversation_id=c.id and cm.user_id=uid)
+     and exists (select 1 from public.conversation_members cm where cm.conversation_id=c.id and cm.user_id=p_other)
+     and (select count(*) from public.conversation_members cm where cm.conversation_id=c.id)=2
+   order by c.created_at
+   limit 1
+   for update;
+
+  if cid is null then
+    insert into public.conversations(organization_id) values(common_org) returning id into cid;
+    insert into public.conversation_members(conversation_id,user_id)
+    values(cid,uid),(cid,p_other)
+    on conflict on constraint conversation_members_pkey do nothing;
+  end if;
+
+  if cid is not null and common_org is not null then
+    update public.conversations
+       set organization_id=coalesce(organization_id,common_org)
+     where id=cid;
+  end if;
+
+  return cid;
+end;
+$$;
+
+revoke all on function public.get_or_create_direct_conversation(uuid,uuid) from public,anon;
+grant execute on function public.get_or_create_direct_conversation(uuid,uuid) to authenticated;
+notify pgrst,'reload schema';
+commit;
+
+-- ============================================================================
+-- SOURCE: supabase/migrations/20261019_fix_message_notification_body.sql
+-- ============================================================================
+begin;
+
+-- A platform administrator may not have a public profile row. SELECT INTO
+-- leaves sender_name null when no row is found, which previously created a
+-- notification with a null body when an Admin replied to support.
+create or replace function public.notify_message_recipients()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  conversation_org uuid;
+  channel_message boolean;
+  sender_name text;
+  notification_title text;
+begin
+  select c.organization_id into conversation_org
+    from public.conversations c
+   where c.id = new.conversation_id;
+
+  select exists(
+    select 1 from public.channels ch where ch.conversation_id = new.conversation_id
+  ) into channel_message;
+
+  select coalesce(p.full_name, 'A NestTrack user') into sender_name
+    from public.profiles p where p.id = new.sender_id;
+  sender_name := coalesce(sender_name, 'A NestTrack user');
+
+  notification_title := case when channel_message then 'New channel message' else 'New direct message' end;
+
+  insert into public.notifications(
+    recipient_user_id,organization_id,event_type,title,body,related_entity_type,related_entity_id
+  )
+  select cm.user_id,conversation_org,
+         case when channel_message then 'channel_message' else 'direct_message' end,
+         notification_title,
+         coalesce(sender_name, 'A NestTrack user') || ': ' || coalesce(left(new.body,240), ''),
+         'message',new.id
+    from public.conversation_members cm
+   where cm.conversation_id = new.conversation_id
+     and cm.user_id is distinct from new.sender_id;
+
+  return new;
+end;
+$$;
+
 notify pgrst,'reload schema';
 commit;

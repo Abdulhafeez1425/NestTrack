@@ -149,7 +149,9 @@ begin
       (cid, p_other)
     on conflict (conversation_id, user_id) do nothing;
 
-  elsif common_org is not null then
+  end if;
+
+  if cid is not null and common_org is not null then
     update public.conversations
        set organization_id = coalesce(organization_id, common_org)
      where id = cid;
@@ -310,6 +312,7 @@ begin
     into sender_name
     from public.profiles p
    where p.id = new.sender_id;
+  sender_name := coalesce(sender_name, 'A NestTrack user');
 
   notification_title :=
     case

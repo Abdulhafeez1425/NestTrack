@@ -63,7 +63,7 @@ begin
   select cid, uid
   union
   select cid, pa.id from public.platform_admins pa
-  on conflict (conversation_id,user_id) do nothing;
+  on conflict on constraint conversation_members_pkey do nothing;
 
   return query select cid, first_admin;
 end;
