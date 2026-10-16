@@ -70,7 +70,7 @@ export default function LandingPage({ onNavigate }: LandingPageProps) {
 
   const go = (path: '/login' | '/signup') => { setMenuOpen(false); onNavigate(path); };
   return <div className="landing-page">
-    <header className={`landing-header ${isScrolled ? 'is-scrolled' : ''}`}><div className="landing-container landing-header-inner"><Brand /><nav className={`landing-nav ${menuOpen ? 'is-open' : ''}`} aria-label="Primary navigation">
+    <header className={`landing-header ${isScrolled ? 'is-scrolled' : ''}`}><div className="landing-container landing-header-inner"><Brand /><nav id="landing-navigation" className={`landing-nav ${menuOpen ? 'is-open' : ''}`} aria-label="Primary navigation">
       <a href="#features" onClick={() => setMenuOpen(false)}>Features</a><a href="#how-it-works" onClick={() => setMenuOpen(false)}>How it works</a><a href="#audiences" onClick={() => setMenuOpen(false)}>For teams</a><a href="#faq" onClick={() => setMenuOpen(false)}>FAQ</a>
       <div className="landing-nav-actions"><button className="landing-link-button" onClick={() => go('/login')}>Sign in</button><button className="landing-button landing-button-small" onClick={() => go('/signup')}>Get started</button></div>
     </nav><button className="landing-menu-button" aria-expanded={menuOpen} aria-controls="landing-navigation" aria-label={menuOpen ? 'Close menu' : 'Open menu'} onClick={() => setMenuOpen(!menuOpen)}><span/><span/><span/></button></div></header>

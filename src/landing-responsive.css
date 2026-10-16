@@ -1,0 +1,229 @@
+/* Landing-page alignment and compact-device refinements. Keep this scoped so workspace UI is unaffected. */
+.landing-page {
+  overflow-x: clip;
+}
+
+.landing-page .landing-container {
+  min-width: 0;
+}
+
+.landing-page .landing-hero-copy,
+.landing-page .landing-section-intro,
+.landing-page .landing-security-copy,
+.landing-page .landing-footer-grid > div,
+.landing-page .landing-footer-links,
+.landing-page .landing-footer-links > div {
+  min-width: 0;
+}
+
+.landing-page .landing-footer-grid {
+  align-items: flex-start;
+}
+
+.landing-page .landing-footer-links {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(110px, 1fr));
+  gap: clamp(28px, 5vw, 80px);
+  width: min(100%, 560px);
+}
+
+.landing-page .landing-footer-links > div {
+  min-width: 0;
+}
+
+.landing-page .landing-footer-links a,
+.landing-page .landing-footer-links button {
+  display: block;
+  width: max-content;
+  max-width: 100%;
+  text-align: left;
+  line-height: 1.45;
+}
+
+.landing-page .landing-footer-links button:focus-visible,
+.landing-page .landing-footer-links a:focus-visible,
+.landing-page .landing-nav a:focus-visible,
+.landing-page .landing-nav button:focus-visible,
+.landing-page .landing-menu-button:focus-visible,
+.landing-page .landing-faq-item button:focus-visible {
+  outline: 3px solid rgba(15, 118, 110, .28);
+  outline-offset: 4px;
+  border-radius: 4px;
+}
+
+.landing-page .landing-footer-bottom {
+  gap: 12px 24px;
+  flex-wrap: wrap;
+}
+
+@media (max-width: 900px) {
+  .landing-page .landing-footer-grid {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    gap: 30px;
+  }
+
+  .landing-page .landing-footer-links {
+    width: 100%;
+    max-width: 640px;
+  }
+}
+
+@media (max-width: 767px) {
+  .landing-page .landing-container {
+    width: min(calc(100% - 32px), 560px);
+  }
+
+  .landing-page .landing-hero,
+  .landing-page .landing-section {
+    overflow: hidden;
+  }
+
+  .landing-page .landing-hero-grid,
+  .landing-page .landing-how-grid,
+  .landing-page .landing-preview-grid,
+  .landing-page .landing-security-grid,
+  .landing-page .landing-faq-grid {
+    gap: 36px;
+  }
+
+  .landing-page .landing-hero-actions {
+    align-items: stretch;
+  }
+
+  .landing-page .landing-hero-actions .landing-button,
+  .landing-page .landing-hero-actions .landing-text-link {
+    width: 100%;
+    text-align: center;
+    justify-content: center;
+  }
+
+  .landing-page .landing-hero-visual {
+    width: 100%;
+    min-height: 0;
+    margin: 0;
+    padding: 12px 0 8px;
+  }
+
+  .landing-page .landing-orbit {
+    display: none;
+  }
+
+  .landing-page .landing-dashboard-card {
+    width: 100%;
+    max-width: 100%;
+  }
+
+  .landing-page .landing-dashboard-body {
+    min-height: 0;
+  }
+
+  .landing-page .landing-preview-content {
+    min-width: 0;
+    padding: clamp(14px, 4vw, 24px);
+  }
+
+  .landing-page .landing-preview-stats,
+  .landing-page .landing-preview-panels {
+    min-width: 0;
+  }
+
+  .landing-page .landing-preview-stats > div,
+  .landing-page .landing-preview-panel {
+    min-width: 0;
+    overflow: hidden;
+  }
+
+  .landing-page .landing-preview-stats b {
+    font-size: clamp(15px, 5vw, 18px);
+  }
+
+  .landing-page .landing-footer {
+    padding-top: 42px;
+  }
+
+  .landing-page .landing-footer-links {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 28px 20px;
+  }
+
+  .landing-page .landing-footer-links > div:last-child {
+    grid-column: 1 / -1;
+  }
+
+  .landing-page .landing-footer-links a,
+  .landing-page .landing-footer-links button {
+    width: 100%;
+    min-height: 24px;
+    padding: 2px 0;
+  }
+
+  .landing-page .landing-footer-bottom {
+    align-items: flex-start;
+    flex-direction: column;
+    margin-top: 32px;
+    padding-top: 15px;
+  }
+}
+
+@media (max-width: 420px) {
+  .landing-page .landing-container {
+    width: calc(100% - 24px);
+  }
+
+  .landing-page .landing-header-inner {
+    min-height: 64px;
+    padding-top: 10px;
+    padding-bottom: 10px;
+  }
+
+  .landing-page .landing-nav {
+    left: 0;
+    right: 0;
+    top: calc(100% + 6px);
+    max-height: calc(100dvh - 76px);
+    overflow-y: auto;
+  }
+
+  .landing-page .landing-hero h1 {
+    font-size: clamp(2.35rem, 13.5vw, 3.1rem);
+    overflow-wrap: anywhere;
+  }
+
+  .landing-page .landing-dashboard-body {
+    display: block;
+  }
+
+  .landing-page .landing-preview-sidebar {
+    width: 100%;
+    height: 36px;
+    padding: 0 12px;
+    flex-direction: row;
+    justify-content: flex-start;
+    gap: 13px;
+  }
+
+  .landing-page .landing-preview-logo {
+    width: 24px;
+    height: 24px;
+    margin: 0 5px 0 0;
+  }
+
+  .landing-page .landing-preview-sidebar span {
+    width: 12px;
+    height: 12px;
+  }
+
+  .landing-page .landing-preview-panels {
+    gap: 8px;
+  }
+
+  .landing-page .landing-footer-links {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 24px;
+  }
+
+  .landing-page .landing-footer-links > div:last-child {
+    grid-column: auto;
+  }
+}
